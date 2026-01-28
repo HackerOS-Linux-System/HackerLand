@@ -1,4 +1,9 @@
-// npm
+// meson
+// ninja
+// gcc
 
 > cd source-code
-> npm run build
+> mkdir -p subprojects
+> meson wrap install lvgl
+> meson setup build --reconfigure
+> ninja -C build
