@@ -14,7 +14,7 @@ void update_view_animations(struct hk_server *server, long delta_time) {
     float rate = server->config.animation_speed;
 
     wl_list_for_each(view, &server->views, link) {
-        if (!view->mapped) continue;
+        if (!view->mapped || !view->scene_tree) continue;
 
         // Interpolate Geometry
         view->current.x = lerp(view->current.x, view->target.x, rate);
@@ -27,13 +27,24 @@ void update_view_animations(struct hk_server *server, long delta_time) {
 
         // Update border geometry
         int bw = (int)server->config.border_width;
-        wlr_scene_rect_set_size(view->border,
-                                (int)view->current.width + bw * 2,
-                                (int)view->current.height + bw * 2);
-        wlr_scene_node_set_position(&view->border->node, -bw, -bw);
+        if (view->border) {
+            wlr_scene_rect_set_size(view->border,
+                                    (int)view->current.width + bw * 2,
+                                    (int)view->current.height + bw * 2);
+            wlr_scene_node_set_position(&view->border->node, -bw, -bw);
+        }
 
         // Tell the client to resize
-        wlr_xdg_toplevel_set_size(view->xdg_toplevel, (int)view->current.width, (int)view->current.height);
+        if (view->type == HK_VIEW_XDG) {
+            wlr_xdg_toplevel_set_size(view->xdg_toplevel, (int)view->current.width, (int)view->current.height);
+        }
+        #if HAS_XWAYLAND
+        else if (view->type == HK_VIEW_XWAYLAND) {
+            wlr_xwayland_surface_configure(view->xwayland_surface,
+                                           (int)view->current.x, (int)view->current.y,
+                                           (int)view->current.width, (int)view->current.height);
+        }
+        #endif
     }
 }
 
@@ -75,13 +86,13 @@ void arrange_windows(struct hk_server *server) {
             view->target.y = start_y;
             view->target.width = master_w;
             view->target.height = usable_h;
-            wlr_scene_rect_set_color(view->border, server->config.color_active_border);
+            if (view->border) wlr_scene_rect_set_color(view->border, server->config.color_active_border);
         } else {
             view->target.x = start_x + master_w + gap;
             view->target.y = start_y + ((i - 1) * (stack_h + gap));
             view->target.width = stack_w;
             view->target.height = stack_h;
-            wlr_scene_rect_set_color(view->border, server->config.color_inactive_border);
+            if (view->border) wlr_scene_rect_set_color(view->border, server->config.color_inactive_border);
         }
 
         // Initialize current if it's new (assignment to struct allowed for named type)
