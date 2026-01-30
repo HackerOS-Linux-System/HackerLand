@@ -1,9 +1,7 @@
-// meson
-// ninja
-// gcc
+// libmiral-dev
+// mir-graphics-drivers-desktop 
+// qtwayland5
+
 
 > cd source-code
-> mkdir -p subprojects
-> meson wrap install lvgl
-> meson setup build --reconfigure
-> ninja -C build
+> 
