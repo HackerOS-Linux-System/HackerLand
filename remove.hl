@@ -1,0 +1,2 @@
+> sudo rm -rf /usr/share/wayland-sessions/HackerLand.desktop
+> sudo rm -rf /usr/bin/hackerland
