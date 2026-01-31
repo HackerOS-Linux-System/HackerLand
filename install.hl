@@ -1,3 +1,5 @@
 // curl
 
->
+> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.1.0/hackerland" -o /usr/bin/hackerland
+> sudo chmod a+x /usr/bin/hackerland
+> sudo curl -L "https://raw.githubusercontent.com/HackerOS-Linux-System/HackerLand/main/HackerLand.desktop" -o /usr/share/wayland-sessions/HackerLand.desktop
