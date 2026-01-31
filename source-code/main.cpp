@@ -6,7 +6,9 @@
 #include <miral/x11_support.h>
 #include <miral/set_terminator.h>
 
-#include <mir/input/event.h>
+#include <mir_toolkit/events/event.h>
+#include <mir_toolkit/events/input/input_event.h>
+#include <mir_toolkit/events/input/keyboard_event.h>
 
 #include <linux/input-event-codes.h>
 
@@ -19,12 +21,16 @@ int main(int argc, char const* argv[]) {
 
     miral::ExternalClientLauncher launcher;
 
-    auto wm_policy = miral::SetWindowManagementPolicy{[&config](miral::WindowManagerTools const& tools) -> std::unique_ptr<miral::WindowManagementPolicy> {
-        return std::make_unique<TilingWindowManager>(tools, config);
+    TilingWindowManager* tiling_wm = nullptr;
+
+    auto wm_policy = miral::SetWindowManagementPolicy{[&config, &tiling_wm](miral::WindowManagerTools const& tools) -> std::unique_ptr<miral::WindowManagementPolicy> {
+        auto policy = std::make_unique<TilingWindowManager>(tools, config);
+        tiling_wm = policy.get();
+        return policy;
     }};
 
     // Rozszerzony filtr wejścia dla skrótów pulpitów
-    miral::AppendEventFilter input_filter{[&runner, &wm_policy](MirEvent const* event) -> bool {
+    miral::AppendEventFilter input_filter{[&runner, &launcher, &tiling_wm](MirEvent const* event) -> bool {
         if (mir_event_get_type(event) != mir_event_type_input) return false;
 
         auto const* iev = mir_event_get_input_event(event);
@@ -34,7 +40,7 @@ int main(int argc, char const* argv[]) {
         if (mir_keyboard_event_action(kev) != mir_keyboard_action_down) return false;
 
         auto mods = mir_keyboard_event_modifiers(kev);
-        auto key = mir_keyboard_event_key_code(kev);
+        auto key = mir_keyboard_event_scan_code(kev);
 
         if ((mods & mir_input_event_modifier_alt) && key == KEY_ESC) {
             runner.stop();
@@ -42,7 +48,7 @@ int main(int argc, char const* argv[]) {
         }
 
         if ((mods & mir_input_event_modifier_alt) && key == KEY_ENTER) {
-            launcher.launch({"sh", "-c", "kitty || alacritty || gnome-terminal || weston-terminal"});
+            launcher.launch(std::vector<std::string>{"sh", "-c", "kitty || alacritty || gnome-terminal || weston-terminal"});
             return true;
         }
 
@@ -55,12 +61,8 @@ int main(int argc, char const* argv[]) {
             else if (key == KEY_4) workspace_id = 3;
             else if (key == KEY_5) workspace_id = 4;
 
-            if (workspace_id != -1) {
-                // Pobierz WM i przełącz
-                auto wm = dynamic_cast<TilingWindowManager*>(wm_policy.operator->());
-                if (wm) {
-                    wm->switch_workspace(workspace_id);
-                }
+            if (workspace_id != -1 && tiling_wm) {
+                tiling_wm->switch_workspace(workspace_id);
                 return true;
             }
         }
@@ -76,8 +78,8 @@ int main(int argc, char const* argv[]) {
 
     // UI: Uruchom zewnętrzne klienty dla tła i paska (użyj swaybg i waybar)
     runner.add_start_callback([&launcher] {
-        launcher.launch({"swaybg", "-i", "/usr/share/backgrounds/gnome/adwaita-day.jpg"});  // Zmień na swoją tapetę
-        launcher.launch({"waybar"});
+        launcher.launch(std::vector<std::string>{"swaybg", "-i", "/usr/share/backgrounds/gnome/adwaita-day.jpg"});  // Zmień na swoją tapetę
+        launcher.launch(std::vector<std::string>{"waybar"});
     });
 
     // Poprawki środowiskowe
