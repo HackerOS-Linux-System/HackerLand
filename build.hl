@@ -1,9 +1,14 @@
 // libmiral-dev
 // mir-graphics-drivers-desktop 
 // qtwayland5
+// cmake
+// cargo
 
 
 > cd source-code
 > mkdir build && cd build
 > cmake ..
 > make
+> cd ..
+> cd bar 
+> cargo build --release
