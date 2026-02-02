@@ -1,1 +1,18 @@
+# Skopiuj ten plik jako: ~/.config/hackerland/Config.toml
+
+[system]
+# Tryb kompozytora: "cage"
+# Zachowuje się jak kiosk - pozwala na wyświetlanie tylko jednego okna na raz.
+# Nowe okna albo zastępują stare, albo są ignorowane (zależnie od logiki WM).
+mode = "cage"
+
+# Aplikacje startowe
+# W trybie Kiosk zazwyczaj jest to jedna konkretna aplikacja
+autostart = [
+    # Przykład: Przeglądarka w trybie kiosku (pełny ekran, brak pasków)
+    "chromium --kiosk https://hackeros.pl",
+    
+    # Alternatywa: Terminal na pełnym ekranie
+    # "kitty --start-as=fullscreen"
+]
 
