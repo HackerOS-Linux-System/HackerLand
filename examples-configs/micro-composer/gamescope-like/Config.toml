@@ -1,1 +1,18 @@
+# Skopiuj ten plik jako: ~/.config/hackerland/Config.toml
+# Uruchomienie: hackerland --config ~/.config/hackerland/Config.toml
+
+[system]
+# Tryb kompozytora:
+# "gamescope" - wymusza maksymalizację okien, idealne do gier
+# "tiling"    - standardowy tryb kafelkowy
+# "cage"      - tryb kiosku (jedno okno)
+mode = "gamescope"
+
+# Lista aplikacji startowych
+# W trybie gamescope zazwyczaj chcemy uruchomić platformę do gier lub samą grę
+autostart = [
+    "steam -bigpicture",
+    # Opcjonalnie: wyłącz wygaszacz ekranu
+    "xset s off -dpms" 
+]
 
