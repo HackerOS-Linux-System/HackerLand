@@ -1,0 +1,35 @@
+# Skopiuj ten plik jako: ~/.config/hackerland/Look.toml
+
+[layout]
+# Odstępy między oknami (w pikselach)
+gap_size = 10
+
+# Odstęp okien od krawędzi ekranu
+padding = 15
+
+# Wysokość paska (musi pasować do wysokości hackerland-bar w CSS)
+bar_height = 34
+
+# Grubość obramowania aktywnego okna
+border_width = 2.0
+
+[animation]
+# Szybkość animacji okien (0.01 - 1.0). Im mniejsza wartość, tym płynniej/wolniej.
+speed = 0.12
+
+[colors]
+# Kolor obramowania aktywnego okna (RGBA: Red, Green, Blue, Alpha)
+# Wartości od 0.0 do 1.0
+# Tutaj: Neonowy Cyjan/Błękit (#7aa2f7 - Tokyo Night Blue)
+active_border = [0.47, 0.63, 0.96, 1.0]
+
+[shortcuts]
+# Definicje skrótów klawiszowych.
+# Format klucza: "Modyfikatory+Klawisz"
+# UWAGA: Obecna implementacja w C++ obsługuje to w uproszczony sposób.
+# Główne skróty systemowe (Alt+Esc, Alt+Workspace) są wbudowane w kodzie.
+
+"Alt+Enter" = "kitty"
+"Alt+B" = "firefox"
+"Alt+E" = "thunar"
+"Alt+Space" = "wofi --show drun"
