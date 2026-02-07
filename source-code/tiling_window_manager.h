@@ -11,24 +11,31 @@
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <set>
 
 // Struktura konfiguracji
 struct Config {
     int gap_size = 10;
     int padding = 20;
     int bar_height = 42;
-    double animation_speed = 0.15; // Szybsza domyślna animacja
+    double animation_speed = 0.15;
 
-    // Nowe pola wizualne
+    // Wizualne
     int border_width = 2;
     int corner_radius = 8;
     std::string active_border_color = "#cba6f7";
     std::string inactive_border_color = "#585b70";
 
-    std::string mode = "tiling"; // "tiling", "cage", "gamescope"
+    std::string mode = "tiling";
     std::string bar_position = "top";
     std::map<std::string, std::string> keybinds;
     bool enable_bar = true;
+};
+
+enum class Layout {
+    MasterStack,
+    Monocle,
+    Grid
 };
 
 struct Geometry {
@@ -58,7 +65,10 @@ public:
     void handle_request_move(miral::WindowInfo& window_info, const MirInputEvent* input_event) override;
     void handle_request_resize(miral::WindowInfo& window_info, const MirInputEvent* input_event, MirResizeEdge edge) override;
 
+    // Public API for control
     void switch_workspace(int workspace_id);
+    void cycle_layout();
+    void resize_master(double delta); // Change split ratio
     void reload_config(const Config& new_config);
 
 private:
@@ -69,6 +79,11 @@ private:
     int current_workspace = 0;
     const int num_workspaces = 5;
 
+    // Layout Management
+    Layout current_layout = Layout::MasterStack;
+    double master_split_ratio = 0.5; // 50% screen for master by default
+    std::string active_window_title = "";
+
     std::map<int, std::vector<miral::WindowInfo>> workspaces;
     std::vector<miral::WindowInfo> floating_windows;
 
@@ -78,10 +93,19 @@ private:
     std::thread animation_thread;
     std::atomic<bool> running{true};
 
+    // IPC
+    std::thread ipc_thread;
+    int server_socket_fd = -1;
+    std::set<int> client_sockets;
+    void setup_ipc();
+    void broadcast_state();
+    void process_ipc_command(const std::string& cmd);
+
+    // Arranging
     void arrange_windows();
     void update_view_animations();
     void update_workspace_visibility();
-    void update_ipc_file();
+
     double lerp(double a, double b, double f) { return a + f * (b - a); }
 };
 
