@@ -1,1 +1,6 @@
-
+[Desktop Entry]
+Name=HackerLand
+Comment=WM based on mir.
+Exec=/usr/bin/hackerland
+Type=Application
+DesktopNames=HackerLand
