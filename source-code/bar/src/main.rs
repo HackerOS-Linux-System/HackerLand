@@ -27,15 +27,34 @@ fn build_ui(app: &Application) {
     .application(app)
     .title("hackerbar")
     .default_width(1920)
-    .default_height(34)
+    .default_height(30)
+    .decorated(false) // WAŻNE: Wyłącza dekoracje systemowe (pasek tytułu)
+    .focusable(false) // WAŻNE: Pasek nie powinien przyjmować focusa (klawiatury/klikania)
     .build();
 
+    // WAŻNE: Zablokowanie możliwości zamknięcia okna (np. przez Alt+F4)
+    window.connect_close_request(|_| {
+        glib::Propagation::Stop
+    });
+
+    // Konfiguracja Layer Shell - to pozycjonuje pasek na górze
     window.init_layer_shell();
     window.set_layer(Layer::Top);
+
+    // Kotwice - przyklej do góry, lewej i prawej
     window.set_anchor(Edge::Top, true);
     window.set_anchor(Edge::Left, true);
     window.set_anchor(Edge::Right, true);
+
+    // Marginesy - upewnij się, że są zerowe
+    window.set_margin(Edge::Top, 0);
+    window.set_margin(Edge::Left, 0);
+    window.set_margin(Edge::Right, 0);
+
+    // Ekskluzywna strefa (odsuwa inne okna)
     window.auto_exclusive_zone_enable();
+
+    // Namespace dla kompozytora
     window.set_namespace(Some("hackerbar"));
 
     let container = Box::new(Orientation::Horizontal, 0);
@@ -95,15 +114,15 @@ fn build_ui(app: &Application) {
     provider.load_from_string(
         r#"
         * { all: unset; }
-        window { background-color: #1a1b26; color: #a9b1d6; }
-        .bar-container { padding: 0px; min-height: 34px; }
-        .logo-box { background-color: #3d59a1; padding: 0px 16px; margin-right: 10px; border-bottom-right-radius: 4px; }
-        .logo-text { color: #ffffff; font-weight: 800; font-family: "Inter", "Roboto", "Segoe UI", sans-serif; font-size: 13px; letter-spacing: 1px; }
-        .right-box { padding-right: 16px; }
-        .stat-item { font-family: "JetBrains Mono", monospace; font-size: 13px; font-weight: 500; color: #c0caf5; }
-        .ws-item { color: #7aa2f7; margin-right: 10px; }
-        .bat-item { color: #9ece6a; }
-        .time-item { color: #bb9af7; font-weight: bold; }
+        window { background-color: #000000; color: #ffffff; font-family: Monospace; font-size: 14px; }
+        .bar-container { padding: 4px; min-height: 30px; }
+        .logo-box { padding: 0px 10px; font-weight: bold; color: #00ff00; }
+        .logo-text { font-weight: bold; }
+        .right-box { padding-right: 10px; }
+        .stat-item { margin-left: 15px; color: #cccccc; }
+        .ws-item { font-weight: bold; color: #ffffff; }
+        .bat-item { color: #ffffff; }
+        .time-item { color: #ffffff; }
         "#,
     );
 
