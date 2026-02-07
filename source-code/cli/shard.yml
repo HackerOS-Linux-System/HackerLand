@@ -1,1 +1,13 @@
+name: hackerland
+version: 0.3
 
+authors:
+  - HackerOS Team <hackeros068@gmail.com>
+
+crystal: ">= 1.0.0"
+
+license: Apache-2.0
+
+targets:
+  hackerland:
+    main: src/main.cr
