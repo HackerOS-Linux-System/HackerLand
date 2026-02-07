@@ -3,6 +3,7 @@
 // qtwayland5
 // cmake
 // cargo
+// crystal
 
 
 > cd source-code
@@ -12,3 +13,9 @@
 > cd ..
 > cd bar 
 > cargo build --release
+> cd ..
+> cd bg
+> cargo build --release
+> cd ..
+> cd cli
+> crystal build src/main.cr --release
