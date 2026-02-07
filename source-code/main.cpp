@@ -149,9 +149,7 @@ int main(int argc, char const* argv[]) {
             launcher.launch(std::vector<std::string>{"hackerland-bar"});
         }
 
-        // --- TERMINAL DIAGNOSTYCZNY ---
-        // Uruchamiamy terminal na starcie, aby użytkownik widział, że system działa
-        launcher.launch(std::vector<std::string>{"sh", "-c", "kitty || alacritty || gnome-terminal || weston-terminal"});
+        // USUNIĘTO: Automatyczne uruchamianie terminala diagnostycznego
     });
 
     // Zmienne środowiskowe dla lepszego wyglądu (QT/GTK theme fix)
@@ -167,8 +165,6 @@ int main(int argc, char const* argv[]) {
 
     if (xwayland_available) {
         setenv("MIR_SERVER_ENABLE_X11", "1", 1);
-        // Próba wymuszenia braku dekoracji dla okien X11 (może pomóc na "brzydkie ramki")
-        // Ale to zależy od klienta.
         return runner.run_with({launcher, input_filter, keymap, wm_policy, miral::X11Support{}, terminator});
     } else {
         unsetenv("MIR_SERVER_ENABLE_X11");
