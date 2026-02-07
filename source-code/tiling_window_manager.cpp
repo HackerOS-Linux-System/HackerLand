@@ -8,7 +8,7 @@ TilingWindowManager::TilingWindowManager(const miral::WindowManagerTools& tools,
 
     animation_thread = std::thread{[this] {
         while (running) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // 100 FPS dla płynności
             this->tools.invoke_under_lock([this] {
                 std::lock_guard<std::recursive_mutex> lock(mutex);
                 update_view_animations();
@@ -22,80 +22,42 @@ TilingWindowManager::~TilingWindowManager() {
     if (animation_thread.joinable()) animation_thread.join();
 }
 
-// CRITICAL FIX: Zamiast zwracać requested_specification, obliczamy, gdzie okno powinno być
-// i zwracamy tę pozycję. Dzięki temu nowe okno od razu "wskakuje" na swoje miejsce w kaflach
-// zamiast pojawiać się jako małe okienko na środku.
+void TilingWindowManager::reload_config(const Config& new_config) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    config = new_config;
+    arrange_windows();
+}
+
 auto TilingWindowManager::place_new_window(const miral::ApplicationInfo& app_info, const miral::WindowSpecification& requested_specification) -> miral::WindowSpecification {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    // Jeśli to okno dialogowe/narzędziowe, pozwól mu być gdzie chce (zazwyczaj środek)
+    // Dialogi i menu zawsze swobodne
     if (requested_specification.type() == mir_window_type_dialog ||
         requested_specification.type() == mir_window_type_utility ||
-        requested_specification.type() == mir_window_type_menu) {
+        requested_specification.type() == mir_window_type_menu ||
+        requested_specification.type() == mir_window_type_tip) {
         return requested_specification;
         }
 
-        // NAPRAWA POZYCJI PASKA: Jeśli nazwa to "hackerbar", wymuś pozycję (0,0)
-        // Nawet jeśli Layer Shell nie zadziała poprawnie, to zapobiegnie centrowaniu paska.
-        if (requested_specification.name().is_set() && requested_specification.name().value().find("hackerbar") != std::string::npos) {
-            miral::WindowSpecification spec = requested_specification;
-            spec.top_left() = mir::geometry::Point{0, 0};
-            return spec;
+        // Pasek i tło
+        if (requested_specification.name().is_set()) {
+            std::string name = requested_specification.name().value();
+            if (name.find("hackerbar") != std::string::npos) {
+                miral::WindowSpecification spec = requested_specification;
+                if (config.bar_position == "bottom") {
+                    spec.top_left() = mir::geometry::Point{0, 1080 - config.bar_height};
+                } else {
+                    spec.top_left() = mir::geometry::Point{0, 0};
+                }
+                return spec;
+            }
         }
 
-        // Dla normalnych okien aplikacji: oblicz przyszłą pozycję
-        // Symulujemy dodanie okna do listy, żeby obliczyć geometrię, ale nie dodajemy go fizycznie jeszcze
-        int current_count = 0;
-        if (workspaces.find(current_workspace) != workspaces.end()) {
-            current_count = workspaces[current_workspace].size();
-        }
-
-        // Będziemy mieli count + 1 okien
-        int count = current_count + 1;
-
-        // Pobierz wymiary ekranu
-        mir::geometry::Rectangle area{{0, 0}, {1920, 1080}};
-        try {
-            auto rect = tools.active_output();
-            if (rect.size.width.as_int() > 0) area = rect;
-        } catch (...) {}
-
-        int screen_w = area.size.width.as_int();
-        int screen_h = area.size.height.as_int();
-        int gap = config.gap_size;
-        int pad = config.padding;
-        int bar_h = config.bar_height;
-
-        int usable_w = screen_w - 2 * pad;
-        int usable_h = screen_h - 2 * pad - bar_h;
-        int start_x = area.top_left.x.as_int() + pad;
-        int start_y = area.top_left.y.as_int() + pad + bar_h;
-
-        // Obliczamy geometrię dla NOWEGO okna (które będzie ostatnie w liście)
-        mir::geometry::Rectangle target_rect;
-
-        if (count == 1) {
-            // Pierwsze okno - pełny ekran
-            target_rect = {{start_x, start_y}, {usable_w, usable_h}};
-        } else {
-            // Kolejne okna idą na stos po prawej
-            int master_w = usable_w / 2 - gap / 2;
-            int stack_w = usable_w - master_w - gap;
-            // Nowe okno ląduje na dole stosu
-            // Uproszczenie: przy 2 oknach, drugie zajmuje całą prawą stronę
-            // Przy >2 oknach, dzielimy prawą stronę.
-            // Żeby nie komplikować logiki tutaj, po prostu zwróćmy geometrię "Master" lub "Stack Top"
-            // Arrange windows i tak to poprawi w klatce animacji, ale ustawienie sensownego startu
-            // zapobiega "miganiu" małego okna.
-
-            target_rect = {{start_x + master_w + gap, start_y}, {stack_w, usable_h / (count - 1)}};
-        }
-
+        // Domyślna specyfikacja dla nowych okien
+        // Ustawiamy je poza ekranem lub na środku, ale arrange_windows zaraz to poprawi
         miral::WindowSpecification spec = requested_specification;
-        spec.top_left() = target_rect.top_left;
-        spec.size() = target_rect.size;
-        spec.state() = mir_window_state_restored; // Wymuś stan restored, żeby nie było zmaksymalizowane "systemowo"
-
+        spec.size() = mir::geometry::Size{800, 600};
+        spec.state() = mir_window_state_restored;
         return spec;
 }
 
@@ -105,7 +67,9 @@ void TilingWindowManager::handle_window_ready(miral::WindowInfo& window_info) {
     auto type = window_info.type();
     std::string name = window_info.name();
 
+    // Ignoruj okna systemowe/specjalne
     if (name.find("hackerbar") != std::string::npos ||
+        name.find("hackerland-bg") != std::string::npos ||
         type == mir_window_type_menu ||
         type == mir_window_type_satellite ||
         type == mir_window_type_tip ||
@@ -119,6 +83,7 @@ void TilingWindowManager::handle_window_ready(miral::WindowInfo& window_info) {
     return;
         }
 
+        // Okna pływające
         if (type == mir_window_type_dialog || type == mir_window_type_utility) {
             floating_windows.push_back(window_info);
             miral::WindowSpecification spec;
@@ -128,6 +93,7 @@ void TilingWindowManager::handle_window_ready(miral::WindowInfo& window_info) {
             return;
         }
 
+        // Sprawdź czy okno już jest w workspace (unikaj duplikatów)
         if (workspaces.find(current_workspace) == workspaces.end()) {
             workspaces[current_workspace] = {};
         }
@@ -140,14 +106,27 @@ void TilingWindowManager::handle_window_ready(miral::WindowInfo& window_info) {
 
         if (!exists) {
             workspaces[current_workspace].push_back(window_info);
+
+            // Startowa geometria dla animacji "Pop-in"
+            // Startujemy ze środka ekranu
+            mir::geometry::Rectangle area{{0, 0}, {1920, 1080}};
+            try { area = tools.active_output(); } catch (...) {}
+
+            Geometry start_geo;
+            start_geo.width = area.size.width.as_int() * 0.5;
+            start_geo.height = area.size.height.as_int() * 0.5;
+            start_geo.x = area.top_left.x.as_int() + (area.size.width.as_int() - start_geo.width) / 2;
+            start_geo.y = area.top_left.y.as_int() + (area.size.height.as_int() - start_geo.height) / 2;
+
+            currents[window_info.window()] = start_geo;
         }
 
-        // Upewnij się, że okno jest widoczne i w stanie restored
         miral::WindowSpecification spec;
         spec.state() = mir_window_state_restored;
         tools.modify_window(window_info, spec);
         tools.raise_tree(window_info.window());
 
+        // Przelicz układ od razu!
         arrange_windows();
         update_workspace_visibility();
         update_ipc_file();
@@ -242,69 +221,94 @@ void TilingWindowManager::switch_workspace(int workspace_id) {
 }
 
 void TilingWindowManager::arrange_windows() {
-    mir::geometry::Rectangle area{{0, 0}, {1280, 720}};
-
+    mir::geometry::Rectangle area{{0, 0}, {1920, 1080}};
     try {
         auto rect = tools.active_output();
-        if (rect.size.width.as_int() > 0 && rect.size.height.as_int() > 0) {
-            area = rect;
+        if (rect.size.width.as_int() > 0) area = rect;
+    } catch (...) {}
+
+    if (config.mode == "cage" || config.mode == "gamescope") {
+        auto& views = workspaces[current_workspace];
+        for (auto& view : views) {
+            Geometry tar;
+            tar.x = area.top_left.x.as_int();
+            tar.y = area.top_left.y.as_int();
+            tar.width = area.size.width.as_int();
+            tar.height = area.size.height.as_int();
+
+            targets[view.window()] = tar;
+            if (currents.find(view.window()) == currents.end()) currents[view.window()] = tar;
         }
-    } catch (...) {
+        return;
     }
 
     int screen_w = area.size.width.as_int();
     int screen_h = area.size.height.as_int();
-
-    if (screen_w <= 0) screen_w = 1280;
-    if (screen_h <= 0) screen_h = 720;
-
     int gap = config.gap_size;
     int pad = config.padding;
     int bar_h = config.bar_height;
+    int bw = config.border_width;
+    int bar_y_offset = (config.bar_position == "top") ? bar_h : 0;
 
     int usable_w = screen_w - 2 * pad;
     int usable_h = screen_h - 2 * pad - bar_h;
     int start_x = area.top_left.x.as_int() + pad;
-    int start_y = area.top_left.y.as_int() + pad + bar_h;
+    int start_y = area.top_left.y.as_int() + pad + bar_y_offset;
 
     auto& views = workspaces[current_workspace];
     size_t count = views.size();
 
     if (count == 0) return;
 
-    int i = 0;
-    int master_w = (count > 1) ? (usable_w / 2 - gap / 2) : usable_w;
-    int stack_w = usable_w - master_w - gap;
-    // Fix: jeśli mamy 2 okna, stack_h to pełna wysokość
-    int stack_h = (count > 2) ? (usable_h - gap * (count - 2)) / (count - 1) : usable_h;
+    // Algorytm Master + Stack
+    // Okno 0: Master (Lewa strona)
+    // Okna 1..n: Stack (Prawa strona, dzielona w pionie)
 
+    int master_count = 1; // Zawsze 1 master
+    int stack_count = count - master_count;
+
+    int master_w = (stack_count > 0) ? (usable_w / 2 - gap / 2) : usable_w;
+    int stack_w = usable_w - master_w - gap;
+
+    int stack_h_per_window = (stack_count > 0) ? ((usable_h - (gap * (stack_count - 1))) / stack_count) : 0;
+
+    int i = 0;
     for (auto& view : views) {
         auto win = view.window();
         Geometry tar;
 
-        if (i == 0) {
+        if (i < master_count) {
+            // Master Window
             tar.x = start_x;
             tar.y = start_y;
             tar.width = master_w;
             tar.height = usable_h;
         } else {
+            // Stack Window(s)
+            int stack_idx = i - master_count;
             tar.x = start_x + master_w + gap;
-            tar.y = start_y + (i - 1) * (stack_h + gap);
+            tar.y = start_y + stack_idx * (stack_h_per_window + gap);
             tar.width = stack_w;
-            tar.height = stack_h;
-            // Ostatnie okno wypełnia resztę w pionie (fix na błędy zaokrągleń)
-            if (i == count - 1) {
-                tar.height = std::max(0, (start_y + usable_h) - static_cast<int>(tar.y));
+            tar.height = stack_h_per_window;
+
+            // Poprawka dla ostatniego okna (zaokrąglenia)
+            if (stack_idx == stack_count - 1) {
+                tar.height = (start_y + usable_h) - tar.y;
             }
         }
 
-        targets[win] = tar;
-
-        if (currents.find(win) == currents.end()) {
-            // Jeśli nowe okno, ustaw start na docelowej pozycji (bez animacji wlotu z nikąd)
-            currents[win] = targets[win];
+        // Apply borders (margin)
+        if (bw > 0) {
+            tar.x += bw;
+            tar.y += bw;
+            tar.width = std::max(1.0, tar.width - 2 * bw);
+            tar.height = std::max(1.0, tar.height - 2 * bw);
         }
 
+        targets[win] = tar;
+        if (currents.find(win) == currents.end()) {
+            currents[win] = tar; // Brak animacji dla "zaginionych" okien
+        }
         i++;
     }
 }
@@ -313,25 +317,35 @@ void TilingWindowManager::update_view_animations() {
     auto& views = workspaces[current_workspace];
     for (auto& view : views) {
         auto win = view.window();
+
+        // Safety checks
+        if (currents.find(win) == currents.end()) continue;
+        if (targets.find(win) == targets.end()) continue;
+
         auto& cur = currents[win];
         auto& tar = targets[win];
 
-        double new_x = lerp(cur.x, tar.x, config.animation_speed);
-        double new_y = lerp(cur.y, tar.y, config.animation_speed);
-        double new_w = lerp(cur.width, tar.width, config.animation_speed);
-        double new_h = lerp(cur.height, tar.height, config.animation_speed);
+        double speed = (config.mode == "gamescope") ? 1.0 : config.animation_speed;
 
-        if (std::abs(new_x - tar.x) < 0.5) new_x = tar.x;
-        if (std::abs(new_y - tar.y) < 0.5) new_y = tar.y;
-        if (std::abs(new_w - tar.width) < 0.5) new_w = tar.width;
-        if (std::abs(new_h - tar.height) < 0.5) new_h = tar.height;
+        double new_x = lerp(cur.x, tar.x, speed);
+        double new_y = lerp(cur.y, tar.y, speed);
+        double new_w = lerp(cur.width, tar.width, speed);
+        double new_h = lerp(cur.height, tar.height, speed);
 
-        if (new_x != cur.x || new_y != cur.y || new_w != cur.width || new_h != cur.height) {
-            cur.x = new_x;
-            cur.y = new_y;
-            cur.width = new_w;
-            cur.height = new_h;
+        // Snap to finish
+        if (std::abs(new_x - tar.x) < 1.0) new_x = tar.x;
+        if (std::abs(new_y - tar.y) < 1.0) new_y = tar.y;
+        if (std::abs(new_w - tar.width) < 1.0) new_w = tar.width;
+        if (std::abs(new_h - tar.height) < 1.0) new_h = tar.height;
 
+        bool changed = (cur.x != new_x || cur.y != new_y || cur.width != new_w || cur.height != new_h);
+
+        cur.x = new_x;
+        cur.y = new_y;
+        cur.width = new_w;
+        cur.height = new_h;
+
+        if (changed) {
             miral::WindowSpecification spec;
             spec.top_left() = mir::geometry::Point{
                 mir::geometry::X(static_cast<int>(cur.x)),
@@ -341,7 +355,6 @@ void TilingWindowManager::update_view_animations() {
                 mir::geometry::Width(static_cast<int>(cur.width)),
                 mir::geometry::Height(static_cast<int>(cur.height))
             };
-
             tools.modify_window(view, spec);
         }
     }
@@ -352,7 +365,11 @@ void TilingWindowManager::update_workspace_visibility() {
         bool is_current = (ws.first == current_workspace);
         for (auto& view : ws.second) {
             miral::WindowSpecification spec;
-            spec.state() = is_current ? mir_window_state_restored : mir_window_state_hidden;
+            if (is_current) {
+                spec.state() = mir_window_state_restored;
+            } else {
+                spec.state() = mir_window_state_hidden;
+            }
             tools.modify_window(view, spec);
         }
     }
