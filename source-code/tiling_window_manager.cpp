@@ -35,9 +35,12 @@ auto TilingWindowManager::place_new_window(const miral::ApplicationInfo& app_inf
         return requested_specification;
         }
 
-        // Ignoruj pasek (hackerbar)
+        // NAPRAWA POZYCJI PASKA: Jeśli nazwa to "hackerbar", wymuś pozycję (0,0)
+        // Nawet jeśli Layer Shell nie zadziała poprawnie, to zapobiegnie centrowaniu paska.
         if (requested_specification.name().is_set() && requested_specification.name().value().find("hackerbar") != std::string::npos) {
-            return requested_specification;
+            miral::WindowSpecification spec = requested_specification;
+            spec.top_left() = mir::geometry::Point{0, 0};
+            return spec;
         }
 
         // Dla normalnych okien aplikacji: oblicz przyszłą pozycję
