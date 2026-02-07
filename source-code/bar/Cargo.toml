@@ -1,19 +1,15 @@
 [package]
-name = "hackerbar"
-version = "0.2.0"
+name = "hackerland-bar"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-gtk4 = { version = "0.10", features = ["v4_12"] }    # Wersja wymagana przez gtk4-layer-shell 0.7.1
-gtk4-layer-shell = "0.7.1"
-# glib usunięte - używamy gtk4::glib w kodzie
-sysinfo = "0.30"
-chrono = "0.4"
-anyhow = "1.0"
+gtk4 = { version = "0.8", features = ["v4_6"] }
+gtk4-layer-shell = "0.3"
 tokio = { version = "1", features = ["full"] }
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
+chrono = "0.4"
+sysinfo = "0.29"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"
