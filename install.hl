@@ -1,7 +1,7 @@
 // curl
 
 > sudo apt update
-> sudo apt install -y libmiral-dev mir-graphics-drivers-desktop mir-platform-graphics-x11
+> sudo apt install -y libmiral7
 > cd ~/.hackeros
 > sudo mkdir hackerland
 > sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.3/hackerland" -o /usr/bin/hackerland
