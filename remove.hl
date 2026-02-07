@@ -1,3 +1,4 @@
+> sudo apt remove -y libmiral7
 > sudo rm -rf /usr/share/wayland-sessions/HackerLand.desktop
 > sudo rm -rf /usr/bin/hackerland
 > sudo rm -rf ~/.hackeros/hackerland/
