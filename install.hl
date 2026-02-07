@@ -4,7 +4,8 @@
 > sudo apt install -y libmiral-dev mir-graphics-drivers-desktop mir-platform-graphics-x11
 > cd ~/.hackeros
 > sudo mkdir hackerland
-> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.2/hackerland" -o /usr/bin/hackerland
+> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.3/hackerland" -o /usr/bin/hackerland
 > sudo chmod a+x /usr/bin/hackerland
-> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.2/hackerland-bar" -o ~/.hackeros/hackerland/
+> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.3/hackerland-bar" -o ~/.hackeros/hackerland/
+> sudo curl -L "https://github.com/HackerOS-Linux-System/HackerLand/releases/download/v0.3/hackerland-bg" -o ~/.hackeros/hackerland/
 > sudo curl -L "https://raw.githubusercontent.com/HackerOS-Linux-System/HackerLand/main/HackerLand.desktop" -o /usr/share/wayland-sessions/HackerLand.desktop
