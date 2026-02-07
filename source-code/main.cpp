@@ -17,21 +17,79 @@
 #include <iostream>
 #include <filesystem>
 #include <vector>
+#include <fstream>
+#include <algorithm>
 
 #include "tiling_window_manager.h"
 
 namespace fs = std::filesystem;
 
-// Funkcja pomocnicza do sprawdzania czy polecenie istnieje
 bool command_exists(const std::string& cmd) {
     std::string check = "which " + cmd + " > /dev/null 2>&1";
     return system(check.c_str()) == 0;
+}
+
+// Prosty parser konfigu
+void load_config(Config& config, const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        auto eq_pos = line.find('=');
+        if (eq_pos != std::string::npos) {
+            std::string key = line.substr(0, eq_pos);
+            std::string val = line.substr(eq_pos + 1);
+
+            // Trim
+            key.erase(0, key.find_first_not_of(" \t"));
+            key.erase(key.find_last_not_of(" \t") + 1);
+            val.erase(0, val.find_first_not_of(" \t\""));
+            val.erase(val.find_last_not_of(" \t\"") + 1);
+
+            if (key == "mode") config.mode = val;
+            else if (key == "bar_position") config.bar_position = val;
+            else if (key == "gap_size") config.gap_size = std::stoi(val);
+            else if (key == "padding") config.padding = std::stoi(val);
+            else if (key == "bar_height") config.bar_height = std::stoi(val);
+            else if (key == "border_width") config.border_width = std::stoi(val);
+            else if (key == "corner_radius") config.corner_radius = std::stoi(val);
+            else if (key == "active_border_color") config.active_border_color = val;
+            else if (key == "inactive_border_color") config.inactive_border_color = val;
+            else if (key.find("bind_") == 0) {
+                config.keybinds[key] = val;
+            }
+        }
+    }
 }
 
 int main(int argc, char const* argv[]) {
     miral::MirRunner runner{argc, argv};
 
     Config config;
+
+    // Sprawdź flagę --config
+    bool config_flag = false;
+    for(int i=1; i<argc; ++i) {
+        if(std::string(argv[i]) == "--config") {
+            config_flag = true;
+            break;
+        }
+    }
+
+    // Ładuj config z pliku
+    const char* home_env = std::getenv("HOME");
+    std::string home = home_env ? home_env : "/tmp";
+    std::string config_path = home + "/.config/hackerland/Config.toml";
+
+    if (fs::exists(config_path)) {
+        load_config(config, config_path);
+    }
+
+    if (!config_flag) {
+        config.mode = "tiling";
+    }
 
     miral::ExternalClientLauncher launcher;
 
@@ -44,7 +102,7 @@ int main(int argc, char const* argv[]) {
     }};
 
     // Obsługa klawiatury
-    miral::AppendEventFilter input_filter{[&runner, &launcher, &tiling_wm](MirEvent const* event) -> bool {
+    miral::AppendEventFilter input_filter{[&runner, &launcher, &tiling_wm, &config](MirEvent const* event) -> bool {
         if (mir_event_get_type(event) != mir_event_type_input) return false;
 
         auto const* iev = mir_event_get_input_event(event);
@@ -56,20 +114,29 @@ int main(int argc, char const* argv[]) {
         auto mods = mir_keyboard_event_modifiers(kev);
         auto key = mir_keyboard_event_scan_code(kev);
 
-        // Alt + Esc: Wyjście
+        // Systemowe skróty
         if ((mods & mir_input_event_modifier_alt) && key == KEY_ESC) {
             runner.stop();
             return true;
         }
 
-        // Alt + Enter: Terminal
+        // TERMINAL LAUNCHER
         if ((mods & mir_input_event_modifier_alt) && key == KEY_ENTER) {
-            // Preferujemy terminale, które dobrze działają na Wayland
-            launcher.launch(std::vector<std::string>{"sh", "-c", "kitty || alacritty || gnome-terminal || weston-terminal || xterm"});
+            if (command_exists("alacritty")) {
+                launcher.launch(std::vector<std::string>{"alacritty"});
+            } else if (command_exists("konsole")) {
+                launcher.launch(std::vector<std::string>{"konsole"});
+            } else if (command_exists("kitty")) {
+                launcher.launch(std::vector<std::string>{"kitty"});
+            } else if (command_exists("gnome-terminal")) {
+                launcher.launch(std::vector<std::string>{"gnome-terminal"});
+            } else {
+                launcher.launch(std::vector<std::string>{"xterm"});
+            }
             return true;
         }
 
-        // Alt + Shift + R: Restart paska
+        // Restart paska
         if ((mods & mir_input_event_modifier_alt) && (mods & mir_input_event_modifier_shift) && key == KEY_R) {
             const char* home_env = std::getenv("HOME");
             std::string home = home_env ? home_env : "/tmp";
@@ -82,7 +149,7 @@ int main(int argc, char const* argv[]) {
             return true;
         }
 
-        // Alt + 1-5: Zmiana pulpitu
+        // Workspace switching
         if (mods & mir_input_event_modifier_alt) {
             int workspace_id = -1;
             if (key == KEY_1) workspace_id = 0;
@@ -106,61 +173,42 @@ int main(int argc, char const* argv[]) {
         exit(0);
     }};
 
-    // Uruchamianie aplikacji startowych (Tapeta i Pasek)
-    runner.add_start_callback([&launcher] {
-        // --- TAPETA ---
-        std::string wallpaper_path = "/usr/share/wallpapers/HackerOS-Wallpapers/Wallpaper1.png";
-
-        // Jeśli dedykowana tapeta nie istnieje, spróbuj znaleźć cokolwiek innego, żeby nie było czarno
-        if (!fs::exists(wallpaper_path)) {
-            if (fs::exists("/usr/share/backgrounds/gnome/adwaita-day.jpg")) {
-                wallpaper_path = "/usr/share/backgrounds/gnome/adwaita-day.jpg";
-            } else {
-                wallpaper_path = ""; // Brak tapety
-            }
-        }
-
-        if (!wallpaper_path.empty() && command_exists("swaybg")) {
-            // Używamy swaybg jako backendu do tapety, uruchamiane wewnętrznie przez hackerland
-            launcher.launch(std::vector<std::string>{"swaybg", "-i", wallpaper_path, "-m", "fill"});
-        }
-
-        // --- PASEK ---
+    runner.add_start_callback([&launcher, &config] {
         const char* home_env = std::getenv("HOME");
         std::string home = home_env ? home_env : "/tmp";
 
-        std::vector<std::string> bar_paths = {
-            home + "/.hackeros/hackerland/hackerland-bar",
-            "./hackerland-bar",
-            "/usr/local/bin/hackerland-bar",
-            "/usr/bin/hackerland-bar"
-        };
+        // --- HACKERLAND-BG (Rust + Smithay) ---
+        std::string bg_path = home + "/.hackeros/hackerland/hackerland-bg";
+        if (!fs::exists(bg_path)) bg_path = "./hackerland-bg";
 
-        bool bar_launched = false;
-        for (const auto& p : bar_paths) {
-            if (fs::exists(p)) {
-                launcher.launch(std::vector<std::string>{p});
-                bar_launched = true;
-                break;
+        if (fs::exists(bg_path)) {
+            launcher.launch(std::vector<std::string>{bg_path});
+        }
+
+        // --- HACKERLAND-BAR ---
+        if (config.enable_bar) {
+            std::string bar_path = home + "/.hackeros/hackerland/hackerland-bar";
+            std::vector<std::string> bar_paths = {
+                bar_path,
+                "./hackerland-bar",
+                "/usr/bin/hackerland-bar"
+            };
+
+            for (const auto& p : bar_paths) {
+                if (fs::exists(p)) {
+                    launcher.launch(std::vector<std::string>{p});
+                    break;
+                }
             }
         }
-
-        if (!bar_launched) {
-            launcher.launch(std::vector<std::string>{"hackerland-bar"});
-        }
-
-        // USUNIĘTO: Automatyczne uruchamianie terminala diagnostycznego
     });
 
-    // Zmienne środowiskowe dla lepszego wyglądu (QT/GTK theme fix)
     setenv("GDK_BACKEND", "wayland", 1);
     setenv("QT_QPA_PLATFORM", "wayland", 1);
-    setenv("SDL_VIDEODRIVER", "wayland", 1);
     setenv("XDG_CURRENT_DESKTOP", "hackerland", 1);
     setenv("XDG_SESSION_TYPE", "wayland", 1);
     setenv("MOZ_ENABLE_WAYLAND", "1", 1);
 
-    // Sprawdź czy Xwayland jest dostępny
     bool xwayland_available = command_exists("Xwayland");
 
     if (xwayland_available) {
