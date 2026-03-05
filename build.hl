@@ -1,21 +1,7 @@
-// libmiral-dev
-// mir-graphics-drivers-desktop 
-// qtwayland5
+// qtwayland6
 // cmake
-// cargo
-// crystal
 
 
-> cd source-code
 > mkdir build && cd build
 > cmake ..
 > make
-> cd ..
-> cd bar 
-> cargo build --release
-> cd ..
-> cd bg
-> cargo build --release
-> cd ..
-> cd cli
-> crystal build src/main.cr --release
