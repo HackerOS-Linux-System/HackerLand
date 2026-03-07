@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=HackerLand
-Comment=WM based on mir.
-Exec=WAYLAND_DISPLAY=wayland-1 /usr/bin/hackerland
-Type=Application
-DesktopNames=HackerLand
