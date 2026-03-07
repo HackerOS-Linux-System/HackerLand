@@ -1,1 +1,166 @@
+# HackerLand WM — config.toml
+# Location: ~/.config/hackeros/hackerland/config.toml
+# If this file doesn't exist, HackerLand generates it automatically.
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compositor mode
+# ─────────────────────────────────────────────────────────────────────────────
+[compositor]
+
+# mode = "tiling"    — full tiling window manager (default)
+# mode = "cage"      — kiosk: runs one app fullscreen, exits when app exits
+# mode = "gamescope" — micro-compositor with optional upscaling for games
+mode = "tiling"
+
+# Number of workspaces (tiling mode only)
+workspaces = 9
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cage mode settings (used when mode = "cage")
+# Launch:  hackerlandwm --config config.toml
+# Or CLI:  hackerlandwm --mode cage --exec "firefox"
+# ─────────────────────────────────────────────────────────────────────────────
+[cage]
+exec          = "alacritty"   # command to run inside cage
+exit_on_close = true          # exit compositor when app closes
+allow_vt      = false         # false = kiosk (block VT switching)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gamescope mode settings (used when mode = "gamescope")
+# Launch:  hackerlandwm --config config.toml
+# Or CLI:  hackerlandwm --mode gamescope --exec "steam"
+# ─────────────────────────────────────────────────────────────────────────────
+[gamescope]
+exec          = "steam"
+render_width  = 1280          # internal render resolution (0 = native)
+render_height = 720
+output_width  = 1920          # output/upscale resolution (0 = native)
+output_height = 1080
+fps_limit     = 60            # 0 = unlimited
+integer_scale = false         # true = integer-only upscaling (sharp pixels)
+fullscreen    = true
+borderless    = true
+filter        = "linear"      # "linear" | "nearest" | "fsr"
+exit_on_close = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Theme — glassmorphism
+# Colors: "#aarrggbb" or "#rrggbb"
+# ─────────────────────────────────────────────────────────────────────────────
+[theme]
+accent              = "#e678c8ff"
+accent_secondary    = "#e6b478ff"
+accent_tertiary     = "#b450ffc8"
+glass_background    = "#a00a0f1e"
+glass_border        = "#28ffffff"
+glass_border_active = "#7878c8ff"
+text_primary        = "#fff0f5ff"
+text_secondary      = "#c8b4bed2"
+text_muted          = "#a078829b"
+bar_background      = "#c8080c19"
+bar_border          = "#14ffffff"
+bar_height          = 38
+bar_blur            = true
+border_width        = 2
+border_radius       = 12
+gap_inner           = 10
+gap_outer           = 12
+inactive_opacity    = 0.92
+active_opacity      = 1.0
+blur_radius         = 24.0
+font_family         = "Geist"
+font_size_bar       = 13
+font_size_ui        = 12
+wallpaper           = "/usr/share/wallpapers/HackerOS-Wallpapers/Wallpaper24.png"
+wallpaper_mode      = "fill"   # fill | fit | center | tile
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Animations
+# ─────────────────────────────────────────────────────────────────────────────
+[animations]
+enabled             = true
+window_open_ms      = 280
+window_close_ms     = 220
+workspace_switch_ms = 320
+tile_rearrange_ms   = 250
+scale_factor        = 0.92
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tiling
+# layout: spiral | tall | wide | grid | dwindle | monocle | bsp | centered
+# ─────────────────────────────────────────────────────────────────────────────
+[tiling]
+layout              = "spiral"
+master_ratio        = 0.55
+max_columns         = 3
+smart_gaps          = true
+smart_borders       = true
+center_single       = true
+center_single_scale = 0.72
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Keybindings
+# modifier: Super | Alt | Ctrl
+# values: exec:CMD | close | fullscreen | float | maximize |
+#         focus:left/right/up/down | move:left/right/up/down |
+#         layout:cycle | workspace:N | movetoworkspace:N | quit | reload
+# ─────────────────────────────────────────────────────────────────────────────
+[keybinds]
+modifier     = "Super"
+
+# Applications
+Return       = "exec:alacritty"
+d            = "exec:fuzzel"
+e            = "exec:thunar"
+b            = "exec:firefox"
+
+# Window management
+q            = "close"
+f            = "fullscreen"
+Shift+f      = "float"
+m            = "maximize"
+
+# Focus (vim keys + arrows)
+h            = "focus:left"
+l            = "focus:right"
+j            = "focus:down"
+k            = "focus:up"
+Left         = "focus:left"
+Right        = "focus:right"
+Down         = "focus:down"
+Up           = "focus:up"
+
+# Move windows in layout
+Shift+h      = "move:left"
+Shift+l      = "move:right"
+Shift+j      = "move:down"
+Shift+k      = "move:up"
+
+# Layout
+Space        = "layout:cycle"
+
+# Workspaces
+1            = "workspace:1"
+2            = "workspace:2"
+3            = "workspace:3"
+4            = "workspace:4"
+5            = "workspace:5"
+6            = "workspace:6"
+7            = "workspace:7"
+8            = "workspace:8"
+9            = "workspace:9"
+Shift+1      = "movetoworkspace:1"
+Shift+2      = "movetoworkspace:2"
+Shift+3      = "movetoworkspace:3"
+Shift+4      = "movetoworkspace:4"
+Shift+5      = "movetoworkspace:5"
+Shift+6      = "movetoworkspace:6"
+Shift+7      = "movetoworkspace:7"
+Shift+8      = "movetoworkspace:8"
+Shift+9      = "movetoworkspace:9"
+
+# System
+Shift+e      = "quit"
+Shift+r      = "reload"
+Print        = "exec:grim"
+Shift+Print  = "exec:grim -g \"$(slurp)\""
