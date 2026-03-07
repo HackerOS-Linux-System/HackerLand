@@ -1,0 +1,61 @@
+{
+    "_comment": "HackerLand WM configuration — JSON format",
+    "theme": {
+        "accent": "#78C8FF",
+        "gap_inner": 10,
+        "gap_outer": 12,
+        "border_radius": 12,
+        "border_width": 2,
+        "bar_height": 38,
+        "wallpaper": "/usr/share/wallpapers/HackerOS-Wallpapers/Wallpaper24.png",
+        "inactive_opacity": 0.92
+    },
+    "tiling": {
+        "layout": "spiral",
+        "master_ratio": 0.55,
+        "smart_gaps": true
+    },
+    "animations": {
+        "enabled": true,
+        "window_open_ms": 280,
+        "window_close_ms": 220,
+        "workspace_switch_ms": 320
+    },
+    "keybinds": {
+        "Super+Return": "exec:alacritty",
+        "Super+Space":  "exec:rofi -show drun",
+        "Super+Q":      "close",
+        "Super+F":      "fullscreen",
+        "Super+Shift+F":"float_toggle",
+        "Super+H":      "focus:left",
+        "Super+J":      "focus:down",
+        "Super+K":      "focus:up",
+        "Super+L":      "focus:right",
+        "Super+Tab":    "focus:next",
+        "Super+Shift+H":"move:left",
+        "Super+Shift+J":"move:down",
+        "Super+Shift+K":"move:up",
+        "Super+Shift+L":"move:right",
+        "Super+T":      "layout:spiral",
+        "Super+Shift+T":"layout:tall",
+        "Super+G":      "layout:grid",
+        "Super+M":      "monocle_toggle",
+        "Super+1": "workspace:1",
+        "Super+2": "workspace:2",
+        "Super+3": "workspace:3",
+        "Super+4": "workspace:4",
+        "Super+5": "workspace:5",
+        "Super+6": "workspace:6",
+        "Super+7": "workspace:7",
+        "Super+8": "workspace:8",
+        "Super+9": "workspace:9",
+        "Super+Shift+1": "move_to_workspace:1",
+        "Super+Shift+2": "move_to_workspace:2",
+        "Super+Shift+3": "move_to_workspace:3",
+        "Super+Shift+4": "move_to_workspace:4",
+        "Super+Shift+5": "move_to_workspace:5",
+        "Super+Shift+R": "reload_config",
+        "Super+Shift+Q": "quit",
+        "Print":         "exec:grim"
+    }
+}
