@@ -1,4 +1,6 @@
 #include "WMCompositor.h"
+#include "compositor/LockScreen.h"
+#include "ui/AppLauncher.h"
 #include "WMOutput.h"
 #include "WMSurface.h"
 #include "core/Window.h"
@@ -475,4 +477,26 @@ void WMCompositor::onXdgToplevelCreated(QWaylandXdgToplevel* toplevel,
                                             Config::instance().load(QString());
                                             retileCurrentWorkspace();
                                             emit tiledWindowsChanged();
+                                        }
+
+                                        void WMCompositor::lockScreen() {
+                                            if (!m_lockScreen) {
+                                                m_lockScreen = new LockScreen(nullptr);
+                                                connect(m_lockScreen, &LockScreen::unlocked, this, [this]{
+                                                    if (m_primaryOutput) m_primaryOutput->setFocus();
+                                                });
+                                            }
+                                            m_lockScreen->lock();
+                                        }
+
+                                        void WMCompositor::showLauncher() {
+                                            if (m_launcher) {
+                                                m_launcher->show();
+                                                m_launcher->raise();
+                                                m_launcher->activateWindow();
+                                            }
+                                        }
+
+                                        void WMCompositor::dispatchAction(const QString& action) {
+                                            handleKeybind(action);
                                         }
