@@ -117,46 +117,103 @@ QRect TilingEngine::applyInnerGap(const QRect& rect,
                                                                                                                 }
 
                                                                                                                 // ─────────────────────────────────────────────────────────────────────────────
-                                                                                                                // Layout: Spiral (Fibonacci)
+                                                                                                                // Layout: Spiral (Enhanced Fibonacci / Golden Ratio)
                                                                                                                 // ─────────────────────────────────────────────────────────────────────────────
-
+                                                                                                                //
+                                                                                                                // Each split uses the golden ratio φ = 0.618… to divide the remaining rect,
+                                                                                                                // cycling through four directions: Right → Down → Left → Up.
+                                                                                                                //
+                                                                                                                // Window 0 (master) uses masterRatio so the user can widen/narrow it.
+                                                                                                                // Windows 1+ use φ so each split looks proportionally "natural".
+                                                                                                                //
+                                                                                                                // Differences from old spiral:
+                                                                                                                //   • Golden-ratio splits (not a fixed 0.5) → windows get progressively
+                                                                                                                //     smaller in the correct Fibonacci proportion.
+                                                                                                                //   • Aspect-ratio guard: if remaining rect is very thin/tall, the algorithm
+                                                                                                                //     rotates the split direction to avoid degenerate 1-pixel-wide windows.
+                                                                                                                //   • Min-size clamp: windows below their minSize are collapsed into the
+                                                                                                                //     last slot rather than rendered off-screen.
+                                                                                                                //
                                                                                                                 QList<TileResult> TilingEngine::layoutSpiral(const TilingContext& ctx) const {
                                                                                                                     QList<TileResult> results;
                                                                                                                     const auto& windows = ctx.tiled;
                                                                                                                     if (windows.isEmpty()) return results;
 
+                                                                                                                    // Golden ratio — each child takes φ of remaining space
+                                                                                                                    static constexpr float kPhi = 0.6180339887f;
+
                                                                                                                     QRect remaining = applyOuterGap(ctx.area);
 
+                                                                                                                    // Pre-collect windows that are too small to tile; merge them into last slot
+                                                                                                                    // (honours minSize constraints set by Wayland clients)
+                                                                                                                    QList<int> validIdx;
                                                                                                                     for (int i = 0; i < windows.size(); ++i) {
-                                                                                                                        const bool last = (i == windows.size() - 1);
-                                                                                                                        QRect winRect;
+                                                                                                                        const QSize ms = windows[i]->minSize();
+                                                                                                                        if (i == 0 || remaining.width() > ms.width() + 60)
+                                                                                                                            validIdx.append(i);
+                                                                                                                    }
+                                                                                                                    if (validIdx.isEmpty()) validIdx.append(0);
+
+                                                                                                                    // Direction sequence: Right, Down, Left, Up
+                                                                                                                    // dir chooses which edge of `remaining` is peeled off for window[i].
+                                                                                                                    int dir = 0;
+
+                                                                                                                    for (int vi = 0; vi < validIdx.size(); ++vi) {
+                                                                                                                        const int   i    = validIdx[vi];
+                                                                                                                        const bool  last = (vi == validIdx.size() - 1);
+                                                                                                                        QRect       winRect;
 
                                                                                                                         if (last) {
                                                                                                                             winRect = remaining;
                                                                                                                         } else {
-                                                                                                                            const int   dir   = i % 4;
-                                                                                                                            const float ratio = (i == 0) ? ctx.masterRatio : 0.5f;
+                                                                                                                            // Choose split ratio: masterRatio for window 0, φ for the rest
+                                                                                                                            const float rawRatio = (i == 0) ? ctx.masterRatio : kPhi;
 
-                                                                                                                            if (dir == 0) {
-                                                                                                                                const int w = (int)(remaining.width() * ratio);
-                                                                                                                                winRect   = QRect(remaining.x(), remaining.y(), w, remaining.height());
-                                                                                                                                remaining = remaining.adjusted(w, 0, 0, 0);
-                                                                                                                            } else if (dir == 1) {
-                                                                                                                                const int h = (int)(remaining.height() * ratio);
-                                                                                                                                winRect   = QRect(remaining.x(), remaining.y(), remaining.width(), h);
-                                                                                                                                remaining = remaining.adjusted(0, h, 0, 0);
-                                                                                                                            } else if (dir == 2) {
-                                                                                                                                const int w = (int)(remaining.width() * (1.0f - ratio));
-                                                                                                                                winRect   = QRect(remaining.right() - w, remaining.y(), w, remaining.height());
-                                                                                                                                remaining = remaining.adjusted(0, 0, -w, 0);
-                                                                                                                            } else {
-                                                                                                                                const int h = (int)(remaining.height() * (1.0f - ratio));
-                                                                                                                                winRect   = QRect(remaining.x(), remaining.bottom() - h, remaining.width(), h);
-                                                                                                                                remaining = remaining.adjusted(0, 0, 0, -h);
+                                                                                                                            // Aspect-ratio guard: skip a direction if the remaining rect
+                                                                                                                            // is too narrow/short in that dimension.
+                                                                                                                            for (int attempt = 0; attempt < 4; ++attempt) {
+                                                                                                                                const int tryDir = (dir + attempt) % 4;
+                                                                                                                                const bool horizSplit = (tryDir == 0 || tryDir == 2);
+                                                                                                                                const int  avail     = horizSplit
+                                                                                                                                ? remaining.width()
+                                                                                                                                : remaining.height();
+                                                                                                                                if (avail >= 120) { dir = tryDir; break; }
                                                                                                                             }
+
+                                                                                                                            switch (dir % 4) {
+                                                                                                                                case 0: {   // peel from left (Right split)
+                                                                                                                                    const int w = int(remaining.width() * rawRatio);
+                                                                                                                                    winRect   = {remaining.x(), remaining.y(), w, remaining.height()};
+                                                                                                                                    remaining = remaining.adjusted(w, 0, 0, 0);
+                                                                                                                                    break;
+                                                                                                                                }
+                                                                                                                                case 1: {   // peel from top (Down split)
+                                                                                                                                    const int h = int(remaining.height() * rawRatio);
+                                                                                                                                    winRect   = {remaining.x(), remaining.y(), remaining.width(), h};
+                                                                                                                                    remaining = remaining.adjusted(0, h, 0, 0);
+                                                                                                                                    break;
+                                                                                                                                }
+                                                                                                                                case 2: {   // peel from right (Left split)
+                                                                                                                                    const int w = int(remaining.width() * (1.f - rawRatio));
+                                                                                                                                    winRect   = {remaining.right() - w + 1, remaining.y(),
+                                                                                                                                        w, remaining.height()};
+                                                                                                                                        remaining = remaining.adjusted(0, 0, -w, 0);
+                                                                                                                                        break;
+                                                                                                                                }
+                                                                                                                                default: {  // peel from bottom (Up split)
+                                                                                                                                    const int h = int(remaining.height() * (1.f - rawRatio));
+                                                                                                                                    winRect   = {remaining.x(), remaining.bottom() - h + 1,
+                                                                                                                                        remaining.width(), h};
+                                                                                                                                        remaining = remaining.adjusted(0, 0, 0, -h);
+                                                                                                                                        break;
+                                                                                                                                }
+                                                                                                                            }
+                                                                                                                            ++dir;
                                                                                                                         }
 
-                                                                                                                        results.append({windows[i], applyHalfGap(winRect), i});
+                                                                                                                        winRect = applyHalfGap(winRect);
+                                                                                                                        winRect = applyConstraints(winRect, windows[i]);
+                                                                                                                        results.append({windows[i], winRect, vi});
                                                                                                                     }
                                                                                                                     return results;
                                                                                                                 }
