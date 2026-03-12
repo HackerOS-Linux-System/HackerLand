@@ -18,6 +18,7 @@ class WMOutput;
 class WMSurface;
 class BarWidget;
 class AppLauncher;
+class LockScreen;
 class NotificationOverlay;
 
 class WMCompositor : public QWaylandCompositor {
@@ -54,6 +55,8 @@ public:
     void toggleMaximize(Window* w = nullptr);
     void launchApp(const QString& cmd);
     void reloadConfig();
+    void lockScreen();
+    void showLauncher();
 
     // ── Geometry ──────────────────────────────────────────────────────────
     QRect     workArea() const;
@@ -64,13 +67,16 @@ public:
     BarWidget*       bar()        { return m_bar; }
 
 signals:
-    void windowAdded          (Window* w);
-    void windowRemoved        (Window* w);
+    void windowAdded           (Window* w);
+    void windowRemoved         (Window* w);
     void activeWorkspaceChanged(int id);
-    void activeWindowChanged  (Window* w);
-    void tiledWindowsChanged  ();
+    void activeWindowChanged   (Window* w);
+    void tiledWindowsChanged   ();
 
 public slots:
+    /// Public entry point for external action dispatch (IPC, gamepad, etc.)
+    void dispatchAction(const QString& action);
+
     void onXdgToplevelCreated(QWaylandXdgToplevel* toplevel,
                               QWaylandXdgSurface*  xdgSurface);
     void onXdgPopupCreated   (QWaylandXdgPopup*    popup,
@@ -90,8 +96,8 @@ private:
     void setupBar();
 
     // ── Internal window lifecycle ─────────────────────────────────────────
-    void addWindowToSystem   (Window* w);   ///< Add to active workspace + retile
-    void removeWindowFromSystem(Window* w); ///< Remove from all workspaces + retile
+    void addWindowToSystem    (Window* w);
+    void removeWindowFromSystem(Window* w);
 
     // ── Helpers ───────────────────────────────────────────────────────────
     void     retileWorkspace(Workspace* ws);
@@ -100,21 +106,21 @@ private:
     void     applyWindowRules(Window* w);
 
     // ── Protocol objects ──────────────────────────────────────────────────
-    QWaylandXdgShell* m_xdgShell   = nullptr;
-    // Note: QWaylandXdgDecorationManagerV1 is owned by WMXdgShell, not here.
+    QWaylandXdgShell* m_xdgShell = nullptr;
 
     // ── Workspaces ────────────────────────────────────────────────────────
     QList<Workspace*> m_workspaces;
     int               m_activeWorkspaceId = 1;
 
     // ── Surface / window maps ─────────────────────────────────────────────
-    QHash<QWaylandXdgToplevel*, Window*>  m_toplevelMap;
+    QHash<QWaylandXdgToplevel*, Window*>    m_toplevelMap;
     QHash<QWaylandSurface*,     WMSurface*> m_surfaceMap;
 
     // ── UI objects ────────────────────────────────────────────────────────
     WMOutput*            m_primaryOutput = nullptr;
     BarWidget*           m_bar           = nullptr;
     AppLauncher*         m_launcher      = nullptr;
+    LockScreen*          m_lockScreen    = nullptr;
     NotificationOverlay* m_notif         = nullptr;
 
     AnimationEngine m_animEngine;
