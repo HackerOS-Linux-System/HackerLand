@@ -14,12 +14,19 @@
 #include <QFont>
 #include <QCursor>
 #include <QElapsedTimer>
+#include <QOpenGLFunctions_3_3_Core>
+#include <QMovie>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLFunctions>
+#include <memory>
 #include <memory>
 
 #include "WindowRenderState.h"
 
 // Forward declarations
 class WMCompositor;
+class GLBlurRenderer;
+class InputHandler;
 class Window;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,6 +103,7 @@ private slots:
 
 private:
     // ── Draw passes ───────────────────────────────────────────────────────
+    void initAnimShader         ();
     void drawWallpaper          (QPainter& p);
     void drawVignette           (QPainter& p);
     void drawWindows            (QPainter& p);
@@ -150,6 +158,26 @@ private:
 
     // ← was missing (used in resizeEvent)
     QPixmap       m_blurCache;
+    bool          m_needsRedraw   = true;
+
+    // OpenGL functions (3.3 core profile)
+    QOpenGLFunctions_3_3_Core* m_gl = nullptr;
+    bool                m_glAvailable = false;
+
+    // GL blur renderer (GPU)
+    GLBlurRenderer*     m_glBlur      = nullptr;
+
+    // Animated wallpaper shader
+    QOpenGLShaderProgram* m_animShader = nullptr;
+    GLuint              m_animVao     = 0;
+    GLuint              m_animVbo     = 0;
+    float               m_animTime    = 0.f;
+
+    // Animated GIF wallpaper
+    QMovie*             m_wallpaperMovie = nullptr;
+
+    // InputHandler (created by WMCompositor, passed here)
+    InputHandler*       m_inputHandler   = nullptr;
 
     QHash<Window*, WindowRenderState> m_renderStates;
 
