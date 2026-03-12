@@ -3,92 +3,107 @@
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
-#include <QStandardPaths>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QJsonParseError>
 #include <QDebug>
 #include <QColor>
+#include <QTextStream>
+#include <QRegularExpression>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JSON helpers — anonymous namespace
+// Minimal TOML parser — supports the subset used by HackerLand config:
+//   [section]
+//   key = "string"
+//   key = 123
+//   key = 1.5
+//   key = true
+//   key = "#rrggbb"
+//   # comment
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-    /// Read a string field with a fallback default.
-    QString jStr(const QJsonObject& obj, const char* key, const QString& def) {
-        auto it = obj.constFind(key);
-        if (it == obj.constEnd() || !it->isString()) return def;
-        return it->toString();
+    struct TomlValue {
+        QString raw;   // trimmed raw value (without surrounding quotes)
+        bool    isStr; // was the value a quoted string?
+    };
+
+    using TomlSection = QMap<QString, TomlValue>;
+    using TomlDoc     = QMap<QString, TomlSection>; // section -> key -> value
+
+    static TomlDoc parseTOMLDoc(const QString& text) {
+        TomlDoc doc;
+        QString section = "__root__";
+        const QStringList lines = text.split('\n');
+
+        for (QString line : lines) {
+            // Strip inline comment
+            const int commentPos = line.indexOf('#');
+            if (commentPos >= 0) line = line.left(commentPos);
+            line = line.trimmed();
+            if (line.isEmpty()) continue;
+
+            // Section header [foo] or [foo.bar]
+            if (line.startsWith('[') && line.endsWith(']')) {
+                section = line.mid(1, line.size() - 2).trimmed();
+                continue;
+            }
+
+            // key = value
+            const int eq = line.indexOf('=');
+            if (eq < 0) continue;
+
+            const QString key = line.left(eq).trimmed();
+            QString val       = line.mid(eq + 1).trimmed();
+
+            TomlValue tv;
+            if ((val.startsWith('"') && val.endsWith('"')) ||
+                (val.startsWith('\'') && val.endsWith('\''))) {
+                tv.raw   = val.mid(1, val.size() - 2);
+            tv.isStr = true;
+                } else {
+                    tv.raw   = val;
+                    tv.isStr = false;
+                }
+                doc[section][key] = tv;
+        }
+        return doc;
     }
 
-    /// Read an int field with a fallback default.
-    int jInt(const QJsonObject& obj, const char* key, int def) {
-        auto it = obj.constFind(key);
-        if (it == obj.constEnd()) return def;
-        if (it->isDouble()) return it->toInt(def);
-        if (it->isString()) {
-            bool ok = false;
-            int v = it->toString().toInt(&ok);
-            return ok ? v : def;
-        }
+    static QString tStr(const TomlSection& s, const char* k, const QString& def) {
+        auto it = s.constFind(k);
+        return (it != s.constEnd()) ? it->raw : def;
+    }
+
+    static int tInt(const TomlSection& s, const char* k, int def) {
+        auto it = s.constFind(k);
+        if (it == s.constEnd()) return def;
+        bool ok; int v = it->raw.toInt(&ok);
+        return ok ? v : def;
+    }
+
+    static float tFloat(const TomlSection& s, const char* k, float def) {
+        auto it = s.constFind(k);
+        if (it == s.constEnd()) return def;
+        bool ok; float v = it->raw.toFloat(&ok);
+        return ok ? v : def;
+    }
+
+    static bool tBool(const TomlSection& s, const char* k, bool def) {
+        auto it = s.constFind(k);
+        if (it == s.constEnd()) return def;
+        const QString v = it->raw.toLower();
+        if (v == "true"  || v == "1" || v == "yes") return true;
+        if (v == "false" || v == "0" || v == "no")  return false;
         return def;
     }
 
-    /// Read a double/float field with a fallback default.
-    double jDouble(const QJsonObject& obj, const char* key, double def) {
-        auto it = obj.constFind(key);
-        if (it == obj.constEnd()) return def;
-        if (it->isDouble()) return it->toDouble(def);
-        if (it->isString()) {
-            bool ok = false;
-            double v = it->toString().toDouble(&ok);
-            return ok ? v : def;
-        }
-        return def;
-    }
-
-    /// Read a bool field with a fallback default.
-    bool jBool(const QJsonObject& obj, const char* key, bool def) {
-        auto it = obj.constFind(key);
-        if (it == obj.constEnd()) return def;
-        if (it->isBool())   return it->toBool(def);
-        if (it->isDouble()) return it->toInt() != 0;
-        if (it->isString()) {
-            const QString s = it->toString().toLower().trimmed();
-            if (s == "true"  || s == "1" || s == "yes" || s == "on")  return true;
-            if (s == "false" || s == "0" || s == "no"  || s == "off") return false;
-        }
-        return def;
-    }
-
-    /// Read a QColor field from a CSS hex string (#RRGGBB or #AARRGGBB).
-    /// Falls back to \p def if the field is missing or unparseable.
-    QColor jColor(const QJsonObject& obj, const char* key, const QColor& def) {
-        auto it = obj.constFind(key);
-        if (it == obj.constEnd() || !it->isString()) return def;
-        QColor c(it->toString());
+    static QColor tColor(const TomlSection& s, const char* k, const QColor& def) {
+        auto it = s.constFind(k);
+        if (it == s.constEnd()) return def;
+        QColor c(it->raw);
         return c.isValid() ? c : def;
     }
 
-    /// Serialise a QColor to "#AARRGGBB" (always includes alpha so transparency
-    /// round-trips correctly).
-    QString colorToJson(const QColor& c) {
-        return c.name(QColor::HexArgb);
-    }
-
-    /// Return the user-specific config path, creating the directory if needed.
-    QString userConfigPath() {
-        // ~/.config/hackerlandwm/config.json
-        const QString dir = QDir::homePath() + "/.config/hackerlandwm";
-        QDir().mkpath(dir);
-        return dir + "/config.json";
-    }
-
-    /// Return the system-wide fallback config path.
-    QString systemConfigPath() {
-        return "/etc/hackerlandwm/hackerlandwm.conf";
+    static QString colorStr(const QColor& c) {
+        return c.name(QColor::HexArgb); // #aarrggbb
     }
 
 } // namespace
@@ -102,483 +117,358 @@ Config& Config::instance() {
     return inst;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Construction
-// ─────────────────────────────────────────────────────────────────────────────
-
 Config::Config() {
-    // Struct initialisers already set all defaults — setDefaults() is a
-    // no-op in the common case but available for explicit reset.
     setDefaults();
-    loadDefaultKeybinds();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// setDefaults — reset every field to the compiled-in values
+// Default config path
 // ─────────────────────────────────────────────────────────────────────────────
 
-void Config::setDefaults() {
-    // ── Theme ─────────────────────────────────────────────────────────────
-    theme.accentColor       = QColor(120, 200, 255, 230);
-    theme.accentSecondary   = QColor(180, 120, 255, 200);
-    theme.accentTertiary    = QColor( 80, 255, 200, 180);
-
-    theme.glassBackground   = QColor( 10,  15,  30, 160);
-    theme.glassBorder       = QColor(255, 255, 255,  40);
-    theme.glassBorderActive = QColor(120, 200, 255, 120);
-
-    theme.textPrimary       = QColor(240, 245, 255, 255);
-    theme.textSecondary     = QColor(180, 190, 210, 200);
-    theme.textMuted         = QColor(120, 130, 155, 160);
-    theme.shadowColor       = QColor(  0,   5,  20, 200);
-
-    theme.barBackground     = QColor(  8,  12,  25, 200);
-    theme.barBorder         = QColor(255, 255, 255,  20);
-    theme.barHeight         = 38;
-    theme.barBlur           = true;
-
-    theme.borderWidth       = 2;
-    theme.borderRadius      = 12;
-    theme.gapInner          = 10;
-    theme.gapOuter          = 12;
-    theme.inactiveOpacity   = 0.92f;
-    theme.activeOpacity     = 1.0f;
-    theme.blurRadius        = 24.0f;
-    theme.blurSaturation    = 1.3f;
-
-    theme.fontFamily        = "Geist";
-    theme.fontFallback      = "SF Pro Display, Inter, sans-serif";
-    theme.fontSizeBar       = 13;
-    theme.fontSizeUI        = 12;
-
-    theme.wallpaperPath     = "/usr/share/wallpapers/HackerOS-Wallpapers/Wallpaper24.png";
-    theme.wallpaperMode     = "fill";
-
-    // ── Animation ─────────────────────────────────────────────────────────
-    anim.enabled            = true;
-    anim.windowOpenMs       = 280;
-    anim.windowCloseMs      = 220;
-    anim.workspaceSwitchMs  = 320;
-    anim.tileRearrangeMs    = 250;
-    anim.openEasing         = "cubic-bezier(0.34,1.56,0.64,1)";
-    anim.closeEasing        = "cubic-bezier(0.55,0,1,0.45)";
-    anim.scaleFactor        = 0.92f;
-
-    // ── Tiling ────────────────────────────────────────────────────────────
-    tiling.layout           = "spiral";
-    tiling.masterRatio      = 0.55f;
-    tiling.maxColumns       = 3;
-    tiling.smartGaps        = true;
-    tiling.smartBorders     = true;
-    tiling.centerSingle     = true;
-    tiling.centerSingleScale = 0.72f;
-
-    // ── Keys ──────────────────────────────────────────────────────────────
-    keys.modifier           = "Super";
-    keys.bindings.clear();
-
-    // ── Meta ──────────────────────────────────────────────────────────────
-    m_workspaceCount        = 9;
+QString Config::defaultConfigPath() {
+    return QDir::homePath() + "/.config/hackeros/hackerland/config.toml";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// loadDefaultKeybinds
-// ─────────────────────────────────────────────────────────────────────────────
-
-void Config::loadDefaultKeybinds() {
-    const QString& m = keys.modifier; // "Super"
-
-    // ── Application launchers ─────────────────────────────────────────────
-    keys.bindings[m + "+Return"]       = "exec:alacritty";
-    keys.bindings[m + "+Space"]        = "launcher";
-    keys.bindings[m + "+E"]            = "exec:thunar";
-    keys.bindings[m + "+B"]            = "exec:firefox";
-    keys.bindings[m + "+Shift+B"]      = "exec:chromium";
-
-    // ── Window control ────────────────────────────────────────────────────
-    keys.bindings[m + "+Q"]            = "close";
-    keys.bindings[m + "+F"]            = "fullscreen";
-    keys.bindings[m + "+Shift+F"]      = "float_toggle";
-    keys.bindings[m + "+Shift+M"]      = "maximize_toggle";
-    keys.bindings[m + "+P"]            = "pin";
-    keys.bindings[m + "+N"]            = "minimize";
-
-    // ── Focus — vi-keys ───────────────────────────────────────────────────
-    keys.bindings[m + "+H"]            = "focus:left";
-    keys.bindings[m + "+J"]            = "focus:down";
-    keys.bindings[m + "+K"]            = "focus:up";
-    keys.bindings[m + "+L"]            = "focus:right";
-    // Focus — arrow keys
-    keys.bindings[m + "+Left"]         = "focus:left";
-    keys.bindings[m + "+Down"]         = "focus:down";
-    keys.bindings[m + "+Up"]           = "focus:up";
-    keys.bindings[m + "+Right"]        = "focus:right";
-    // Focus — cycle
-    keys.bindings[m + "+Tab"]          = "focus:next";
-    keys.bindings[m + "+Shift+Tab"]    = "focus:prev";
-    keys.bindings[m + "+grave"]        = "focus:last";     // Super+` = alt-tab style
-    keys.bindings[m + "+Return"]       = "focus:master";   // override: also promote
-
-    // ── Move windows — vi-keys ────────────────────────────────────────────
-    keys.bindings[m + "+Shift+H"]      = "move:left";
-    keys.bindings[m + "+Shift+J"]      = "move:down";
-    keys.bindings[m + "+Shift+K"]      = "move:up";
-    keys.bindings[m + "+Shift+L"]      = "move:right";
-    // Move to master position
-    keys.bindings[m + "+Shift+Return"] = "move:master";
-
-    // ── Master ratio ──────────────────────────────────────────────────────
-    keys.bindings[m + "+Ctrl+H"]       = "master_ratio:shrink";
-    keys.bindings[m + "+Ctrl+L"]       = "master_ratio:grow";
-    keys.bindings[m + "+Ctrl+Left"]    = "master_ratio:shrink";
-    keys.bindings[m + "+Ctrl+Right"]   = "master_ratio:grow";
-
-    // ── Window resize (floating) ──────────────────────────────────────────
-    keys.bindings[m + "+Ctrl+Shift+H"] = "resize:shrink_width";
-    keys.bindings[m + "+Ctrl+Shift+L"] = "resize:grow_width";
-    keys.bindings[m + "+Ctrl+Shift+J"] = "resize:grow_height";
-    keys.bindings[m + "+Ctrl+Shift+K"] = "resize:shrink_height";
-
-    // ── Layout selection ──────────────────────────────────────────────────
-    keys.bindings[m + "+T"]            = "layout:spiral";
-    keys.bindings[m + "+Shift+T"]      = "layout:tall";
-    keys.bindings[m + "+W"]            = "layout:wide";
-    keys.bindings[m + "+G"]            = "layout:grid";
-    keys.bindings[m + "+D"]            = "layout:dwindle";
-    keys.bindings[m + "+M"]            = "layout:monocle";
-    keys.bindings[m + "+Shift+C"]      = "layout:centered";
-    keys.bindings[m + "+Shift+G"]      = "layout:three_column";
-    // Cycle forward / backward through layouts
-    keys.bindings[m + "+bracketright"] = "layout:cycle_forward";
-    keys.bindings[m + "+bracketleft"]  = "layout:cycle_backward";
-
-    // ── Workspace switching 1–9 ───────────────────────────────────────────
-    for (int i = 1; i <= 9; ++i) {
-        const QString n = QString::number(i);
-        keys.bindings[m + "+" + n]           = "workspace:" + n;
-        keys.bindings[m + "+Shift+" + n]     = "move_to_workspace:" + n;
-        keys.bindings[m + "+Ctrl+" + n]      = "move_to_workspace_follow:" + n;
-    }
-    // Workspace cycling
-    keys.bindings[m + "+Ctrl+Right"]   = "workspace:next";
-    keys.bindings[m + "+Ctrl+Left"]    = "workspace:prev";
-    keys.bindings[m + "+Shift+Right"]  = "workspace:next";
-    keys.bindings[m + "+Shift+Left"]   = "workspace:prev";
-
-    // ── Screenshots ───────────────────────────────────────────────────────
-    keys.bindings["Print"]             = "exec:grim";
-    keys.bindings[m + "+Print"]        = "exec:grim -g \"$(slurp)\"";
-    keys.bindings[m + "+Shift+Print"]  = "exec:grim -g \"$(slurp)\" - | wl-copy";
-
-    // ── System ────────────────────────────────────────────────────────────
-    keys.bindings[m + "+Shift+R"]      = "reload_config";
-    keys.bindings[m + "+Shift+Q"]      = "quit";
-    keys.bindings[m + "+Shift+E"]      = "logout";
-    keys.bindings[m + "+Ctrl+L"]       = "exec:swaylock";
-    keys.bindings["XF86AudioRaiseVolume"]  = "exec:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+";
-    keys.bindings["XF86AudioLowerVolume"]  = "exec:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-";
-    keys.bindings["XF86AudioMute"]         = "exec:wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
-    keys.bindings["XF86AudioPlay"]         = "exec:playerctl play-pause";
-    keys.bindings["XF86AudioNext"]         = "exec:playerctl next";
-    keys.bindings["XF86AudioPrev"]         = "exec:playerctl previous";
-    keys.bindings["XF86MonBrightnessUp"]   = "exec:brightnessctl set 10%+";
-    keys.bindings["XF86MonBrightnessDown"] = "exec:brightnessctl set 10%-";
-
-    qDebug() << "[Config] default keybinds loaded:"
-    << keys.bindings.size() << "bindings";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// load
+// Load
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool Config::load(const QString& path) {
-    // Resolve the file to load.  If \p path is empty, try user config first,
-    // then fall back to the system-wide config.
-    QString filePath = path;
-    if (filePath.isEmpty()) {
-        filePath = userConfigPath();
-        if (!QFile::exists(filePath)) {
-            filePath = systemConfigPath();
-        }
+    const QString target = path.isEmpty() ? defaultConfigPath() : path;
+    m_loadedPath = target;
+
+    QFile f(target);
+    if (!f.exists()) {
+        qInfo() << "[Config] file not found:" << target
+        << "— generating with defaults";
+        setDefaults();
+        loadDefaultKeybinds();
+        save(target);  // auto-generate
+        return true;
     }
 
-    if (!QFile::exists(filePath)) {
-        qWarning() << "[Config] file not found:" << filePath
-        << "— using compiled-in defaults";
-        m_loadedPath = filePath;
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "[Config] cannot open:" << target;
+        setDefaults();
+        loadDefaultKeybinds();
         return false;
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "[Config] cannot open" << filePath
-        << ":" << file.errorString();
-        return false;
+    const QString text = QTextStream(&f).readAll();
+    f.close();
+
+    setDefaults();
+    loadDefaultKeybinds();
+    const bool ok = parseTOML(text);
+    if (ok) qInfo() << "[Config] loaded:" << target;
+    return ok;
+}
+
+bool Config::reload() {
+    return load(m_loadedPath);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOML parser  (populates structs from TomlDoc)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool Config::parseTOML(const QString& text) {
+    const TomlDoc doc = parseTOMLDoc(text);
+
+    // ── [compositor] ─────────────────────────────────────────────────────
+    if (doc.contains("compositor")) {
+        const auto& s = doc["compositor"];
+        const QString m = tStr(s, "mode", "tiling").toLower();
+        if      (m == "cage")       mode = CompositorMode::Cage;
+        else if (m == "gamescope")  mode = CompositorMode::Gamescope;
+        else                        mode = CompositorMode::Tiling;
+
+        m_workspaceCount = tInt(s, "workspaces", m_workspaceCount);
     }
 
-    const QByteArray data = file.readAll();
-    file.close();
-
-    QJsonParseError err;
-    const QJsonDocument doc = QJsonDocument::fromJson(data, &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning() << "[Config] JSON parse error in" << filePath
-        << "at offset" << err.offset
-        << ":" << err.errorString();
-        return false;
+    // ── [cage] ────────────────────────────────────────────────────────────
+    if (doc.contains("cage")) {
+        const auto& s   = doc["cage"];
+        cage.exec        = tStr  (s, "exec",         cage.exec);
+        cage.exitOnClose = tBool (s, "exit_on_close", cage.exitOnClose);
+        cage.allowVt     = tBool (s, "allow_vt",      cage.allowVt);
     }
 
-    if (!doc.isObject()) {
-        qWarning() << "[Config] root is not a JSON object in" << filePath;
-        return false;
+    // ── [gamescope] ───────────────────────────────────────────────────────
+    if (doc.contains("gamescope")) {
+        const auto& s        = doc["gamescope"];
+        gamescope.exec        = tStr  (s, "exec",          gamescope.exec);
+        gamescope.renderW     = tInt  (s, "render_width",   gamescope.renderW);
+        gamescope.renderH     = tInt  (s, "render_height",  gamescope.renderH);
+        gamescope.outputW     = tInt  (s, "output_width",   gamescope.outputW);
+        gamescope.outputH     = tInt  (s, "output_height",  gamescope.outputH);
+        gamescope.fpsLimit    = tInt  (s, "fps_limit",      gamescope.fpsLimit);
+        gamescope.integerScale= tBool (s, "integer_scale",  gamescope.integerScale);
+        gamescope.fullscreen  = tBool (s, "fullscreen",     gamescope.fullscreen);
+        gamescope.borderless  = tBool (s, "borderless",     gamescope.borderless);
+        gamescope.filter      = tStr  (s, "filter",         gamescope.filter);
+        gamescope.exitOnClose = tBool (s, "exit_on_close",  gamescope.exitOnClose);
     }
 
-    const QJsonObject root = doc.object();
-
-    // ── Parse [theme] ─────────────────────────────────────────────────────
-    if (root.contains("theme") && root["theme"].isObject()) {
-        const QJsonObject t = root["theme"].toObject();
-
-        theme.accentColor       = jColor(t, "accent",           theme.accentColor);
-        theme.accentSecondary   = jColor(t, "accent_secondary",  theme.accentSecondary);
-        theme.accentTertiary    = jColor(t, "accent_tertiary",   theme.accentTertiary);
-        theme.glassBackground   = jColor(t, "glass_background",  theme.glassBackground);
-        theme.glassBorder       = jColor(t, "glass_border",      theme.glassBorder);
-        theme.glassBorderActive = jColor(t, "glass_border_active",theme.glassBorderActive);
-        theme.textPrimary       = jColor(t, "text_primary",      theme.textPrimary);
-        theme.textSecondary     = jColor(t, "text_secondary",    theme.textSecondary);
-        theme.textMuted         = jColor(t, "text_muted",        theme.textMuted);
-        theme.shadowColor       = jColor(t, "shadow_color",      theme.shadowColor);
-        theme.barBackground     = jColor(t, "bar_background",    theme.barBackground);
-        theme.barBorder         = jColor(t, "bar_border",        theme.barBorder);
-
-        theme.barHeight         = jInt   (t, "bar_height",       theme.barHeight);
-        theme.barBlur           = jBool  (t, "bar_blur",         theme.barBlur);
-        theme.borderWidth       = jInt   (t, "border_width",     theme.borderWidth);
-        theme.borderRadius      = jInt   (t, "border_radius",    theme.borderRadius);
-        theme.gapInner          = jInt   (t, "gap_inner",        theme.gapInner);
-        theme.gapOuter          = jInt   (t, "gap_outer",        theme.gapOuter);
-        theme.inactiveOpacity   = (float)jDouble(t,"inactive_opacity",theme.inactiveOpacity);
-        theme.activeOpacity     = (float)jDouble(t,"active_opacity",  theme.activeOpacity);
-        theme.blurRadius        = (float)jDouble(t,"blur_radius",     theme.blurRadius);
-        theme.blurSaturation    = (float)jDouble(t,"blur_saturation", theme.blurSaturation);
-
-        theme.fontFamily        = jStr   (t, "font_family",      theme.fontFamily);
-        theme.fontFallback      = jStr   (t, "font_fallback",    theme.fontFallback);
-        theme.fontSizeBar       = jInt   (t, "font_size_bar",    theme.fontSizeBar);
-        theme.fontSizeUI        = jInt   (t, "font_size_ui",     theme.fontSizeUI);
-
-        theme.wallpaperPath     = jStr   (t, "wallpaper",        theme.wallpaperPath);
-        theme.wallpaperMode     = jStr   (t, "wallpaper_mode",   theme.wallpaperMode);
+    // ── [theme] ───────────────────────────────────────────────────────────
+    if (doc.contains("theme")) {
+        const auto& s            = doc["theme"];
+        theme.accentColor         = tColor(s, "accent",            theme.accentColor);
+        theme.accentSecondary     = tColor(s, "accent_secondary",   theme.accentSecondary);
+        theme.accentTertiary      = tColor(s, "accent_tertiary",    theme.accentTertiary);
+        theme.glassBackground     = tColor(s, "glass_background",   theme.glassBackground);
+        theme.glassBorder         = tColor(s, "glass_border",       theme.glassBorder);
+        theme.glassBorderActive   = tColor(s, "glass_border_active",theme.glassBorderActive);
+        theme.textPrimary         = tColor(s, "text_primary",       theme.textPrimary);
+        theme.textSecondary       = tColor(s, "text_secondary",     theme.textSecondary);
+        theme.textMuted           = tColor(s, "text_muted",         theme.textMuted);
+        theme.barBackground       = tColor(s, "bar_background",     theme.barBackground);
+        theme.barBorder           = tColor(s, "bar_border",         theme.barBorder);
+        theme.barHeight           = tInt  (s, "bar_height",         theme.barHeight);
+        theme.barBlur             = tBool (s, "bar_blur",           theme.barBlur);
+        theme.borderWidth         = tInt  (s, "border_width",       theme.borderWidth);
+        theme.borderRadius        = tInt  (s, "border_radius",      theme.borderRadius);
+        theme.gapInner            = tInt  (s, "gap_inner",          theme.gapInner);
+        theme.gapOuter            = tInt  (s, "gap_outer",          theme.gapOuter);
+        theme.inactiveOpacity     = tFloat(s, "inactive_opacity",   theme.inactiveOpacity);
+        theme.activeOpacity       = tFloat(s, "active_opacity",     theme.activeOpacity);
+        theme.blurRadius          = tFloat(s, "blur_radius",        theme.blurRadius);
+        theme.fontFamily          = tStr  (s, "font_family",        theme.fontFamily);
+        theme.fontSizeBar         = tInt  (s, "font_size_bar",      theme.fontSizeBar);
+        theme.fontSizeUI          = tInt  (s, "font_size_ui",       theme.fontSizeUI);
+        theme.wallpaperPath       = tStr  (s, "wallpaper",          theme.wallpaperPath);
+        theme.wallpaperMode       = tStr  (s, "wallpaper_mode",     theme.wallpaperMode);
     }
 
-    // ── Parse [animations] ────────────────────────────────────────────────
-    if (root.contains("animations") && root["animations"].isObject()) {
-        const QJsonObject a = root["animations"].toObject();
-
-        anim.enabled           = jBool  (a, "enabled",          anim.enabled);
-        anim.windowOpenMs      = jInt   (a, "window_open_ms",   anim.windowOpenMs);
-        anim.windowCloseMs     = jInt   (a, "window_close_ms",  anim.windowCloseMs);
-        anim.workspaceSwitchMs = jInt   (a, "workspace_switch_ms", anim.workspaceSwitchMs);
-        anim.tileRearrangeMs   = jInt   (a, "tile_rearrange_ms",anim.tileRearrangeMs);
-        anim.openEasing        = jStr   (a, "open_easing",      anim.openEasing);
-        anim.closeEasing       = jStr   (a, "close_easing",     anim.closeEasing);
-        anim.scaleFactor       = (float)jDouble(a,"scale_factor",anim.scaleFactor);
+    // ── [animations] ──────────────────────────────────────────────────────
+    if (doc.contains("animations")) {
+        const auto& s         = doc["animations"];
+        anim.enabled           = tBool (s, "enabled",            anim.enabled);
+        anim.windowOpenMs      = tInt  (s, "window_open_ms",     anim.windowOpenMs);
+        anim.windowCloseMs     = tInt  (s, "window_close_ms",    anim.windowCloseMs);
+        anim.workspaceSwitchMs = tInt  (s, "workspace_switch_ms",anim.workspaceSwitchMs);
+        anim.tileRearrangeMs   = tInt  (s, "tile_rearrange_ms",  anim.tileRearrangeMs);
+        anim.scaleFactor       = tFloat(s, "scale_factor",       anim.scaleFactor);
     }
 
-    // ── Parse [tiling] ────────────────────────────────────────────────────
-    if (root.contains("tiling") && root["tiling"].isObject()) {
-        const QJsonObject t = root["tiling"].toObject();
-
-        tiling.layout            = jStr   (t, "layout",             tiling.layout);
-        tiling.masterRatio       = (float)jDouble(t,"master_ratio", tiling.masterRatio);
-        tiling.maxColumns        = jInt   (t, "max_columns",        tiling.maxColumns);
-        tiling.smartGaps         = jBool  (t, "smart_gaps",         tiling.smartGaps);
-        tiling.smartBorders      = jBool  (t, "smart_borders",      tiling.smartBorders);
-        tiling.centerSingle      = jBool  (t, "center_single",      tiling.centerSingle);
-        tiling.centerSingleScale = (float)jDouble(t,"center_single_scale",
-                                                  tiling.centerSingleScale);
+    // ── [tiling] ──────────────────────────────────────────────────────────
+    if (doc.contains("tiling")) {
+        const auto& s         = doc["tiling"];
+        tiling.layout          = tStr  (s, "layout",              tiling.layout);
+        tiling.masterRatio     = tFloat(s, "master_ratio",        tiling.masterRatio);
+        tiling.maxColumns      = tInt  (s, "max_columns",         tiling.maxColumns);
+        tiling.smartGaps       = tBool (s, "smart_gaps",          tiling.smartGaps);
+        tiling.smartBorders    = tBool (s, "smart_borders",       tiling.smartBorders);
+        tiling.centerSingle    = tBool (s, "center_single",       tiling.centerSingle);
+        tiling.centerSingleScale= tFloat(s,"center_single_scale", tiling.centerSingleScale);
     }
 
-    // ── Parse [workspaces] ────────────────────────────────────────────────
-    if (root.contains("workspaces") && root["workspaces"].isObject()) {
-        const QJsonObject w = root["workspaces"].toObject();
-        m_workspaceCount = jInt(w, "count", m_workspaceCount);
-        m_workspaceCount = qBound(1, m_workspaceCount, 20);
-    }
-
-    // ── Parse [keybinds] ─────────────────────────────────────────────────
-    // The config file's [keybinds] section merges with (and can override)
-    // the defaults populated by loadDefaultKeybinds().  User bindings take
-    // precedence; use the special value "none" or "" to unbind a key.
-    if (root.contains("keybinds") && root["keybinds"].isObject()) {
-        const QJsonObject kb = root["keybinds"].toObject();
-
-        // Optional: override the modifier key.
-        if (kb.contains("modifier") && kb["modifier"].isString()) {
-            keys.modifier = kb["modifier"].toString();
-        }
-
-        // Merge binding entries.
-        const QJsonObject binds = kb.contains("bindings") && kb["bindings"].isObject()
-        ? kb["bindings"].toObject()
-        : kb; // legacy: flat object at [keybinds] level
-
-        for (auto it = binds.constBegin(); it != binds.constEnd(); ++it) {
+    // ── [keybinds] ────────────────────────────────────────────────────────
+    if (doc.contains("keybinds")) {
+        const auto& s = doc["keybinds"];
+        keys.modifier  = tStr(s, "modifier", keys.modifier);
+        for (auto it = s.constBegin(); it != s.constEnd(); ++it) {
             if (it.key() == "modifier") continue;
-            const QString action = it->toString().trimmed();
-            if (action.isEmpty() || action.toLower() == "none") {
-                keys.bindings.remove(it.key());
-            } else {
-                keys.bindings[it.key()] = action;
-            }
+            keys.bindings[it.key()] = it->raw;
         }
     }
-
-    m_loadedPath = filePath;
-
-    qInfo() << "[Config] loaded from:" << filePath
-    << "| bindings:" << keys.bindings.size()
-    << "| workspaces:" << m_workspaceCount;
 
     emit configReloaded();
     return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// save
+// Serialize to TOML
+// ─────────────────────────────────────────────────────────────────────────────
+
+QString Config::serializeTOML() const {
+    QString t;
+    QTextStream s(&t);
+
+    s << "# HackerLand WM — config.toml\n"
+    << "# Generated automatically. Edit freely.\n"
+    << "# Location: ~/.config/hackeros/hackerland/config.toml\n\n";
+
+    // ── [compositor] ──────────────────────────────────────────────────────
+    s << "[compositor]\n";
+    s << "# mode = \"tiling\" | \"cage\" | \"gamescope\"\n";
+    switch (mode) {
+        case CompositorMode::Cage:      s << "mode = \"cage\"\n";      break;
+        case CompositorMode::Gamescope: s << "mode = \"gamescope\"\n"; break;
+        default:                        s << "mode = \"tiling\"\n";    break;
+    }
+    s << "workspaces = " << m_workspaceCount << "\n\n";
+
+    // ── [cage] ────────────────────────────────────────────────────────────
+    s << "[cage]\n"
+    << "# Command to run in kiosk/cage mode (used when mode = \"cage\")\n"
+    << "exec         = \"" << cage.exec << "\"\n"
+    << "exit_on_close = " << (cage.exitOnClose ? "true" : "false") << "\n"
+    << "allow_vt      = " << (cage.allowVt     ? "true" : "false") << "\n\n";
+
+    // ── [gamescope] ───────────────────────────────────────────────────────
+    s << "[gamescope]\n"
+    << "# Command to run inside the micro-compositor (mode = \"gamescope\")\n"
+    << "exec          = \"" << gamescope.exec << "\"\n"
+    << "render_width  = " << gamescope.renderW << "\n"
+    << "render_height = " << gamescope.renderH << "\n"
+    << "output_width  = " << gamescope.outputW << "\n"
+    << "output_height = " << gamescope.outputH << "\n"
+    << "fps_limit     = " << gamescope.fpsLimit << "\n"
+    << "integer_scale = " << (gamescope.integerScale ? "true" : "false") << "\n"
+    << "fullscreen    = " << (gamescope.fullscreen   ? "true" : "false") << "\n"
+    << "borderless    = " << (gamescope.borderless   ? "true" : "false") << "\n"
+    << "filter        = \"" << gamescope.filter << "\"\n"
+    << "exit_on_close = " << (gamescope.exitOnClose  ? "true" : "false") << "\n\n";
+
+    // ── [theme] ───────────────────────────────────────────────────────────
+    s << "[theme]\n"
+    << "accent              = \"" << colorStr(theme.accentColor)       << "\"\n"
+    << "accent_secondary    = \"" << colorStr(theme.accentSecondary)   << "\"\n"
+    << "accent_tertiary     = \"" << colorStr(theme.accentTertiary)    << "\"\n"
+    << "glass_background    = \"" << colorStr(theme.glassBackground)   << "\"\n"
+    << "glass_border        = \"" << colorStr(theme.glassBorder)       << "\"\n"
+    << "glass_border_active = \"" << colorStr(theme.glassBorderActive) << "\"\n"
+    << "text_primary        = \"" << colorStr(theme.textPrimary)       << "\"\n"
+    << "text_secondary      = \"" << colorStr(theme.textSecondary)     << "\"\n"
+    << "text_muted          = \"" << colorStr(theme.textMuted)         << "\"\n"
+    << "bar_background      = \"" << colorStr(theme.barBackground)     << "\"\n"
+    << "bar_border          = \"" << colorStr(theme.barBorder)         << "\"\n"
+    << "bar_height          = "   << theme.barHeight                   << "\n"
+    << "bar_blur            = "   << (theme.barBlur ? "true":"false")  << "\n"
+    << "border_width        = "   << theme.borderWidth                 << "\n"
+    << "border_radius       = "   << theme.borderRadius                << "\n"
+    << "gap_inner           = "   << theme.gapInner                    << "\n"
+    << "gap_outer           = "   << theme.gapOuter                    << "\n"
+    << "inactive_opacity    = "   << theme.inactiveOpacity             << "\n"
+    << "active_opacity      = "   << theme.activeOpacity               << "\n"
+    << "blur_radius         = "   << theme.blurRadius                  << "\n"
+    << "font_family         = \"" << theme.fontFamily                  << "\"\n"
+    << "font_size_bar       = "   << theme.fontSizeBar                 << "\n"
+    << "font_size_ui        = "   << theme.fontSizeUI                  << "\n"
+    << "wallpaper           = \"" << theme.wallpaperPath               << "\"\n"
+    << "wallpaper_mode      = \"" << theme.wallpaperMode               << "\"\n\n";
+
+    // ── [animations] ──────────────────────────────────────────────────────
+    s << "[animations]\n"
+    << "enabled             = " << (anim.enabled ? "true" : "false")  << "\n"
+    << "window_open_ms      = " << anim.windowOpenMs                  << "\n"
+    << "window_close_ms     = " << anim.windowCloseMs                 << "\n"
+    << "workspace_switch_ms = " << anim.workspaceSwitchMs             << "\n"
+    << "tile_rearrange_ms   = " << anim.tileRearrangeMs               << "\n"
+    << "scale_factor        = " << anim.scaleFactor                   << "\n\n";
+
+    // ── [tiling] ──────────────────────────────────────────────────────────
+    s << "[tiling]\n"
+    << "# layout: spiral | tall | wide | grid | dwindle | monocle | bsp | centered\n"
+    << "layout              = \"" << tiling.layout           << "\"\n"
+    << "master_ratio        = "   << tiling.masterRatio      << "\n"
+    << "max_columns         = "   << tiling.maxColumns       << "\n"
+    << "smart_gaps          = "   << (tiling.smartGaps     ? "true":"false") << "\n"
+    << "smart_borders       = "   << (tiling.smartBorders  ? "true":"false") << "\n"
+    << "center_single       = "   << (tiling.centerSingle  ? "true":"false") << "\n"
+    << "center_single_scale = "   << tiling.centerSingleScale << "\n\n";
+
+    // ── [keybinds] ────────────────────────────────────────────────────────
+    s << "[keybinds]\n"
+    << "# modifier: Super | Alt | Ctrl\n"
+    << "modifier = \"" << keys.modifier << "\"\n";
+    for (auto it = keys.bindings.constBegin(); it != keys.bindings.constEnd(); ++it) {
+        s << it.key() << " = \"" << it.value() << "\"\n";
+    }
+    s << "\n";
+
+    return t;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Save
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool Config::save(const QString& path) {
-    const QString savePath = path.isEmpty()
-    ? (m_loadedPath.isEmpty() ? userConfigPath() : m_loadedPath)
-    : path;
+    const QString target = path.isEmpty() ? m_loadedPath : path;
+    if (target.isEmpty()) return false;
 
-    // Create the parent directory if it doesn't exist.
-    QDir().mkpath(QFileInfo(savePath).absoluteDir().absolutePath());
+    // Create directory if needed
+    QDir().mkpath(QFileInfo(target).absolutePath());
 
-    // ── Build JSON document ───────────────────────────────────────────────
-
-    QJsonObject root;
-
-    // ── [theme] ───────────────────────────────────────────────────────────
-    {
-        QJsonObject t;
-        t["accent"]              = colorToJson(theme.accentColor);
-        t["accent_secondary"]    = colorToJson(theme.accentSecondary);
-        t["accent_tertiary"]     = colorToJson(theme.accentTertiary);
-        t["glass_background"]    = colorToJson(theme.glassBackground);
-        t["glass_border"]        = colorToJson(theme.glassBorder);
-        t["glass_border_active"] = colorToJson(theme.glassBorderActive);
-        t["text_primary"]        = colorToJson(theme.textPrimary);
-        t["text_secondary"]      = colorToJson(theme.textSecondary);
-        t["text_muted"]          = colorToJson(theme.textMuted);
-        t["shadow_color"]        = colorToJson(theme.shadowColor);
-        t["bar_background"]      = colorToJson(theme.barBackground);
-        t["bar_border"]          = colorToJson(theme.barBorder);
-
-        t["bar_height"]          = theme.barHeight;
-        t["bar_blur"]            = theme.barBlur;
-        t["border_width"]        = theme.borderWidth;
-        t["border_radius"]       = theme.borderRadius;
-        t["gap_inner"]           = theme.gapInner;
-        t["gap_outer"]           = theme.gapOuter;
-        t["inactive_opacity"]    = (double)theme.inactiveOpacity;
-        t["active_opacity"]      = (double)theme.activeOpacity;
-        t["blur_radius"]         = (double)theme.blurRadius;
-        t["blur_saturation"]     = (double)theme.blurSaturation;
-
-        t["font_family"]         = theme.fontFamily;
-        t["font_fallback"]       = theme.fontFallback;
-        t["font_size_bar"]       = theme.fontSizeBar;
-        t["font_size_ui"]        = theme.fontSizeUI;
-
-        t["wallpaper"]           = theme.wallpaperPath;
-        t["wallpaper_mode"]      = theme.wallpaperMode;
-
-        root["theme"] = t;
-    }
-
-    // ── [animations] ──────────────────────────────────────────────────────
-    {
-        QJsonObject a;
-        a["enabled"]             = anim.enabled;
-        a["window_open_ms"]      = anim.windowOpenMs;
-        a["window_close_ms"]     = anim.windowCloseMs;
-        a["workspace_switch_ms"] = anim.workspaceSwitchMs;
-        a["tile_rearrange_ms"]   = anim.tileRearrangeMs;
-        a["open_easing"]         = anim.openEasing;
-        a["close_easing"]        = anim.closeEasing;
-        a["scale_factor"]        = (double)anim.scaleFactor;
-        root["animations"] = a;
-    }
-
-    // ── [tiling] ──────────────────────────────────────────────────────────
-    {
-        QJsonObject t;
-        t["layout"]              = tiling.layout;
-        t["master_ratio"]        = (double)tiling.masterRatio;
-        t["max_columns"]         = tiling.maxColumns;
-        t["smart_gaps"]          = tiling.smartGaps;
-        t["smart_borders"]       = tiling.smartBorders;
-        t["center_single"]       = tiling.centerSingle;
-        t["center_single_scale"] = (double)tiling.centerSingleScale;
-        root["tiling"] = t;
-    }
-
-    // ── [workspaces] ──────────────────────────────────────────────────────
-    {
-        QJsonObject w;
-        w["count"] = m_workspaceCount;
-        root["workspaces"] = w;
-    }
-
-    // ── [keybinds] ────────────────────────────────────────────────────────
-    {
-        QJsonObject kb;
-        kb["modifier"] = keys.modifier;
-
-        QJsonObject binds;
-        for (auto it = keys.bindings.constBegin();
-             it != keys.bindings.constEnd(); ++it)
-             {
-                 binds[it.key()] = it.value();
-             }
-             kb["bindings"] = binds;
-        root["keybinds"] = kb;
-    }
-
-    // ── Write file ────────────────────────────────────────────────────────
-    QFile file(savePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        qWarning() << "[Config] cannot write to" << savePath
-        << ":" << file.errorString();
+    QFile f(target);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "[Config] cannot write:" << target;
         return false;
     }
 
-    const QByteArray json = QJsonDocument(root).toJson(QJsonDocument::Indented);
-    if (file.write(json) != json.size()) {
-        qWarning() << "[Config] short write to" << savePath;
-        file.close();
-        return false;
-    }
-
-    file.close();
-    m_loadedPath = savePath;
-
-    qInfo() << "[Config] saved to:" << savePath;
+    QTextStream(&f) << serializeTOML();
+    qInfo() << "[Config] saved:" << target;
     return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// reload — convenience: re-load from the last-used path
+// Defaults
 // ─────────────────────────────────────────────────────────────────────────────
 
-bool Config::reload() {
-    const QString path = m_loadedPath.isEmpty() ? userConfigPath() : m_loadedPath;
-    qInfo() << "[Config] reloading from:" << path;
-    setDefaults();
-    loadDefaultKeybinds();
-    return load(path);
+void Config::setDefaults() {
+    mode      = CompositorMode::Tiling;
+    cage      = CageConfig{};
+    gamescope = GamescopeConfig{};
+    theme     = ThemeConfig{};
+    anim      = AnimConfig{};
+    tiling    = TilingConfig{};
+    keys      = KeybindConfig{};
+    m_workspaceCount = 9;
+}
+
+void Config::loadDefaultKeybinds() {
+    keys.modifier = "Super";
+    keys.bindings.clear();
+
+    // Applications
+    keys.bindings["Return"]       = "exec:alacritty";
+    keys.bindings["d"]            = "exec:fuzzel";
+    keys.bindings["e"]            = "exec:thunar";
+    keys.bindings["b"]            = "exec:firefox";
+
+    // Window management
+    keys.bindings["q"]            = "close";
+    keys.bindings["f"]            = "fullscreen";
+    keys.bindings["Shift+f"]      = "float";
+    keys.bindings["m"]            = "maximize";
+
+    // Focus
+    keys.bindings["h"]            = "focus:left";
+    keys.bindings["l"]            = "focus:right";
+    keys.bindings["j"]            = "focus:down";
+    keys.bindings["k"]            = "focus:up";
+    keys.bindings["Left"]         = "focus:left";
+    keys.bindings["Right"]        = "focus:right";
+    keys.bindings["Down"]         = "focus:down";
+    keys.bindings["Up"]           = "focus:up";
+
+    // Move windows
+    keys.bindings["Shift+h"]      = "move:left";
+    keys.bindings["Shift+l"]      = "move:right";
+    keys.bindings["Shift+j"]      = "move:down";
+    keys.bindings["Shift+k"]      = "move:up";
+
+    // Layout cycling
+    keys.bindings["Space"]        = "layout:cycle";
+    keys.bindings["t"]            = "layout:tiling";
+    keys.bindings["Shift+Space"]  = "layout:float";
+
+    // Workspaces 1–9
+    for (int i = 1; i <= 9; ++i) {
+        keys.bindings[QString::number(i)]             = QString("workspace:%1").arg(i);
+        keys.bindings[QString("Shift+%1").arg(i)]     = QString("movetoworkspace:%1").arg(i);
+    }
+
+    // System
+    keys.bindings["Shift+e"]      = "quit";
+    keys.bindings["Shift+r"]      = "reload";
+    keys.bindings["Print"]        = "exec:grim";
+    keys.bindings["Shift+Print"]  = "exec:grim -g \"$(slurp)\"";
+
+    // Terminal (used by cage/gamescope fallback)
+    keys.bindings["terminal"]     = "alacritty";
+
+    qInfo() << "[Config] default keybinds loaded:" << keys.bindings.size() << "bindings";
 }
