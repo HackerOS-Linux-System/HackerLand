@@ -156,6 +156,7 @@ public:
 
     /// Re-read keybindings from Config::instance().keys after a config reload.
     void reloadBindings();
+    void reloadKeyRemaps();
 
 signals:
     // ── Keybind actions ───────────────────────────────────────────────────
@@ -209,7 +210,7 @@ private:
 
     /// Build the canonical binding key string for a Qt key event,
     /// e.g. "Super+Return", "Super+Shift+Q", "Alt+F4".
-    QString buildBindingKey(QKeyEvent* event) const;
+    QString buildBindingKey(QKeyEvent* event, int overrideKey = 0) const;
 
     /// Look up \p bindingKey in the bindings table.
     KeybindMatch matchBinding(const QString& bindingKey) const;
@@ -267,6 +268,7 @@ private:
     Qt::KeyboardModifiers m_modifiers      = Qt::NoModifier;
     QSet<int>             m_pressedKeys;   ///< Qt::Key values currently held
     QSet<int>             m_consumedKeys;  ///< Keys consumed by a keybind
+    QHash<int,int>        m_keyRemaps;     ///< Qt::Key → Qt::Key remaps (e.g. CapsLock→Super)
 
     // Pointer
     QPoint                m_cursorPos;
@@ -292,6 +294,7 @@ private:
         QPointF             startCentroid;
         float               startSpan  = 0.f;
         GestureType         active     = GestureType::None;
+        bool                committed  = false;
     } m_touch;
 
     // Layout constants (must match WMOutput drawing constants)
